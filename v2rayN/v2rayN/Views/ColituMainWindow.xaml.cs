@@ -205,7 +205,7 @@ public partial class ColituMainWindow
     // ── Views and navigation ───────────────────────────────────────────────
     private void ShowView(FrameworkElement view)
     {
-        foreach (var candidate in new FrameworkElement[] { LoadingView, AuthView, VerifyView, AppView })
+        foreach (var candidate in new FrameworkElement[] { LoadingView, AuthView, ResetView, VerifyView, AppView })
         {
             candidate.Visibility = candidate == view ? Visibility.Visible : Visibility.Collapsed;
         }

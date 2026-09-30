@@ -276,9 +276,10 @@ public partial class ColituMainWindow
 
         DevicesText.Text = subscription == null ? "—" : $"{Math.Max(1, subscription.DevicesUsed)} / {Math.Max(1, subscription.DeviceLimit)}";
 
-        var expiresSoon = active && ExpiresAt(subscription!) is { } end && end - DateTimeOffset.UtcNow < TimeSpan.FromDays(3);
-        PlanCtaButton.Visibility = !active || expiresSoon ? Visibility.Visible : Visibility.Collapsed;
-        PlanCtaText.Text = active ? loc["plan.extend"] : loc["plan.choose"];
+        var free = IsFreePlan(subscription);
+        var expiresSoon = active && !free && ExpiresAt(subscription!) is { } end && end - DateTimeOffset.UtcNow < TimeSpan.FromDays(3);
+        PlanCtaButton.Visibility = !active || expiresSoon || free ? Visibility.Visible : Visibility.Collapsed;
+        PlanCtaText.Text = free ? loc["plan.upgrade"] : active ? loc["plan.extend"] : loc["plan.choose"];
 
         // Account page
         var email = _auth.CurrentUser?.Email ?? "";
@@ -287,7 +288,7 @@ public partial class ColituMainWindow
         AccountId.Text = _auth.CurrentUser?.Id is { Length: > 0 } id ? $"ID · {id[..Math.Min(8, id.Length)]}" : "";
         AccountPlan.Text = active ? PlanTitle(subscription!) : loc["plan.none"];
         SetBadge(AccountPlanBadge, AccountPlanBadgeText, status);
-        AccountUntil.Text = ExpiresAt(subscription) is { } until ? FormatDate(until) : "—";
+        AccountUntil.Text = free ? loc["plan.freeHint"] : ExpiresAt(subscription) is { } until ? FormatDate(until) : "—";
 
         // Plan page strip
         CurrentPlanText.Text = active ? $"{PlanTitle(subscription!)} · {PlanDetailText(subscription!)}" : loc["plan.none"];
@@ -295,8 +296,16 @@ public partial class ColituMainWindow
         CreditText.Text = loc.Format("brand.credit", ("brand", "Avenlith"));
     }
 
+    /// <summary>The free plan: 10 GB a month, renewed on the 1st.</summary>
+    private static bool IsFreePlan(ColituSubscription? subscription) =>
+        string.Equals(subscription?.PlanName, "Free", StringComparison.OrdinalIgnoreCase);
+
     private string PlanTitle(ColituSubscription subscription)
     {
+        if (IsFreePlan(subscription))
+        {
+            return Loc.I["plan.freeName"];
+        }
         if (string.Equals(subscription.Status, "trialing", StringComparison.OrdinalIgnoreCase))
         {
             return Loc.I["plan.trialName"];
@@ -306,6 +315,10 @@ public partial class ColituMainWindow
 
     private string PlanDetailText(ColituSubscription subscription)
     {
+        if (IsFreePlan(subscription))
+        {
+            return Loc.I["plan.freeHint"];
+        }
         if (ExpiresAt(subscription) is not { } end)
         {
             return "";
@@ -331,6 +344,7 @@ public partial class ColituMainWindow
             "active" => "plan.status.active",
             "trialing" => "plan.status.trialing",
             "expired" => "plan.status.expired",
+            "quota_exceeded" => "plan.status.quota",
             _ => "plan.status.inactive"
         };
         text.Text = Loc.I[key];

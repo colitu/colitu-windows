@@ -125,7 +125,7 @@ public partial class ColituMainWindow
             await EnterAppAsync(offline: false);
             if (_registerMode && _auth.CurrentSubscription?.Active == true)
             {
-                ShowToast(Loc.I["plan.trialName"] + " · " + PlanDetailText(_auth.CurrentSubscription));
+                ShowToast(PlanTitle(_auth.CurrentSubscription) + " · " + PlanDetailText(_auth.CurrentSubscription));
             }
         }
         catch (Exception ex)
@@ -197,7 +197,7 @@ public partial class ColituMainWindow
 
     private void HideAuthError() => AuthErrorBox.Visibility = Visibility.Collapsed;
 
-    private void Forgot_Click(object sender, RoutedEventArgs e) => OpenUrl(LocalizedPath("/support"));
+    private void Forgot_Click(object sender, RoutedEventArgs e) => ShowReset(EmailBox.Text.Trim());
 
     private void TermsLink_Click(object sender, RoutedEventArgs e) => OpenUrl(LocalizedPath("/legal/terms"));
 

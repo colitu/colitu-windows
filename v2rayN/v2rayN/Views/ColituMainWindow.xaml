@@ -256,6 +256,53 @@
             </Grid>
         </Grid>
 
+        <!-- ── Password reset ──────────────────────────────────────────────── -->
+        <Grid x:Name="ResetView" Visibility="Collapsed">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <Border Width="468" Margin="0,36" Padding="38,36" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Panel}">
+                    <StackPanel x:Name="ResetCard">
+                        <Grid Width="64" Height="64" HorizontalAlignment="Left">
+                            <Ellipse Fill="{StaticResource IconWellBrush}" Stroke="{StaticResource LineStrongBrush}" StrokeThickness="1" />
+                            <Path Width="26" Height="26" Data="{StaticResource IconLock}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.8" />
+                        </Grid>
+                        <TextBlock Margin="0,24,0,0" Style="{StaticResource H1}" Text="{s:T reset.title}" />
+                        <TextBlock x:Name="ResetSubtitle" Margin="0,10,0,0" Style="{StaticResource Muted}" TextWrapping="Wrap" />
+                        <TextBlock Margin="2,24,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.email}" />
+                        <TextBox x:Name="ResetEmailBox" KeyDown="ResetField_KeyDown" Style="{StaticResource Field}" Tag="{s:T auth.emailHint}" />
+                        <StackPanel x:Name="ResetCodeFields" Visibility="Collapsed">
+                            <TextBlock Margin="2,16,0,8" Style="{StaticResource FieldLabel}" Text="{s:T verify.code}" />
+                            <TextBox x:Name="ResetCodeBox" Height="58" Padding="16,0" FontSize="24" FontWeight="SemiBold" InputMethod.IsInputMethodEnabled="False" KeyDown="ResetField_KeyDown" MaxLength="6" PreviewTextInput="VerifyCode_PreviewTextInput" Style="{StaticResource Field}" TextAlignment="Center" />
+                            <TextBlock Margin="2,16,0,8" Style="{StaticResource FieldLabel}" Text="{s:T reset.newPassword}" />
+                            <PasswordBox x:Name="ResetPasswordBox" KeyDown="ResetField_KeyDown" Style="{StaticResource PasswordField}" />
+                            <TextBlock Margin="2,6,0,0" FontSize="12" Foreground="{StaticResource MutedBrush}" Text="{s:T auth.passwordHint}" />
+                            <TextBlock Margin="2,14,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.passwordRepeat}" />
+                            <PasswordBox x:Name="ResetRepeatBox" KeyDown="ResetField_KeyDown" Style="{StaticResource PasswordField}" />
+                        </StackPanel>
+                        <Border x:Name="ResetInfoBox" Margin="0,16,0,0" Padding="14,10" Background="#149F8CFF" BorderBrush="#599F8CFF" BorderThickness="1" CornerRadius="16" Visibility="Collapsed">
+                            <TextBlock x:Name="ResetInfoText" FontSize="13" Foreground="{StaticResource LilacBrush}" TextWrapping="Wrap" />
+                        </Border>
+                        <Border x:Name="ResetErrorBox" Margin="0,16,0,0" Padding="14,10" Background="#1AFF6B7A" BorderBrush="#59FF6B7A" BorderThickness="1" CornerRadius="16" Visibility="Collapsed">
+                            <TextBlock x:Name="ResetErrorText" FontSize="13" Foreground="#FFA3AE" TextWrapping="Wrap" />
+                        </Border>
+                        <Button x:Name="ResetSubmitButton" Height="52" Margin="0,20,0,0" HorizontalAlignment="Stretch" Click="ResetSubmit_Click" Style="{StaticResource PrimaryButton}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse x:Name="ResetSpinner" Margin="0,0,10,0" Stroke="{StaticResource OnAccentBrush}" Style="{StaticResource Spinner}" Visibility="Collapsed" />
+                                <TextBlock x:Name="ResetSubmitText" FontSize="15.5" />
+                            </StackPanel>
+                        </Button>
+                        <Grid Margin="0,18,0,0">
+                            <Button x:Name="ResetResendButton" HorizontalAlignment="Left" Click="ResetResend_Click" Style="{StaticResource LinkButton}" Visibility="Collapsed">
+                                <TextBlock x:Name="ResetResendText" />
+                            </Button>
+                            <Button HorizontalAlignment="Right" Click="ResetBack_Click" Content="{s:T reset.back}" Style="{StaticResource LinkButton}" />
+                        </Grid>
+                        <Button x:Name="ResetChangeEmailButton" Margin="0,8,0,0" HorizontalAlignment="Left" Click="ResetChangeEmail_Click" Content="{s:T reset.changeEmail}" Style="{StaticResource LinkButton}" Visibility="Collapsed" />
+                        <TextBlock x:Name="ResetNote" Margin="0,16,0,0" Style="{StaticResource Small}" Text="{s:T reset.note}" TextWrapping="Wrap" Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
+            </ScrollViewer>
+        </Grid>
+
         <!-- ── E-mail verification ───────────────────────────────────────────── -->
         <Grid x:Name="VerifyView" Visibility="Collapsed">
             <Border Width="468" Padding="38,36" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Panel}">

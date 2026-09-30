@@ -105,8 +105,8 @@ public partial class ColituMainWindow
         _resendTimer?.Stop();
         await EnterAppAsync(offline: false);
         var subscription = _auth.CurrentSubscription;
-        ShowToast(subscription?.Status == "trialing"
-            ? Loc.I["verify.done"] + " " + Loc.I["plan.trialName"] + " · " + PlanDetailText(subscription)
+        ShowToast(subscription?.Active == true
+            ? Loc.I["verify.done"] + " " + PlanTitle(subscription) + " · " + PlanDetailText(subscription)
             : Loc.I["verify.done"]);
     }
 

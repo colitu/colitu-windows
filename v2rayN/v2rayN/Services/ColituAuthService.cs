@@ -156,6 +156,22 @@ public sealed class ColituAuthService
         return await AuthenticateAsync("/auth/register", new { email = email.Trim(), password, locale = Loc.I.Language }, email.Trim(), sendCode: false);
     }
 
+    /// <summary>E-mails a six-digit password reset code. Unknown addresses get the same answer.</summary>
+    public async Task RequestPasswordResetAsync(string email)
+    {
+        using var response = await SendClientJsonAsync(HttpMethod.Post, "/auth/password/forgot", new { email = email.Trim(), locale = Loc.I.Language });
+        await EnsureSuccessAsync(response);
+    }
+
+    /// <summary>
+    /// Sets a new password with the e-mailed code. The panel signs the account
+    /// out everywhere else and returns tokens for this computer.
+    /// </summary>
+    public async Task<ColituAuthResult> ResetPasswordAsync(string email, string code, string password)
+    {
+        return await AuthenticateAsync("/auth/password/reset", new { email = email.Trim(), code = code.Trim(), password }, email.Trim(), sendCode: true);
+    }
+
     /// <summary>True while the signed-in account still has to confirm its e-mail address.</summary>
     public bool PendingVerification { get; private set; }
 
@@ -893,6 +909,7 @@ public sealed class ColituAuthService
             "VERIFICATION_CODE_INVALID" => loc["verify.err.invalid"],
             "VERIFICATION_CODE_EXPIRED" => loc["verify.err.expired"],
             "VERIFICATION_RATE_LIMITED" => loc["verify.err.wait"],
+            "AUTH_INVALID_PASSWORD" => loc["auth.err.password"],
             "EMAIL_DELIVERY_UNAVAILABLE" => loc["verify.err.mail"],
             "SUPPORT_FILE_TOO_LARGE" or "SUPPORT_FILE_TYPE" => loc["support.err.file"],
             "SUPPORT_UNAVAILABLE" => loc["support.err.unavailable"],
