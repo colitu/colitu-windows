@@ -1,0 +1,83 @@
+<Window
+    x:Class="v2rayN.Views.SetupWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Colitu VPN Setup"
+    Width="540"
+    Height="400"
+    AllowsTransparency="True"
+    Background="Transparent"
+    FontFamily="{StaticResource ColituFont}"
+    Icon="/Resources/colitu.ico"
+    ResizeMode="NoResize"
+    ShowInTaskbar="True"
+    WindowStartupLocation="CenterScreen"
+    WindowStyle="None">
+    <!-- Same look as the main window: near-black, lavender glow and the hex dot grid. -->
+    <Border Background="{StaticResource BgBrush}" BorderBrush="{StaticResource WindowEdgeBrush}" BorderThickness="1" CornerRadius="28">
+        <Grid>
+            <Border CornerRadius="28" IsHitTestVisible="False">
+                <Border.Background>
+                    <RadialGradientBrush Center="0.5,-0.05" GradientOrigin="0.5,-0.05" RadiusX="0.9" RadiusY="1.1">
+                        <GradientStop Offset="0" Color="#449F8CFF" />
+                        <GradientStop Offset="0.45" Color="#149F8CFF" />
+                        <GradientStop Offset="1" Color="#009F8CFF" />
+                    </RadialGradientBrush>
+                </Border.Background>
+            </Border>
+            <Border Background="{StaticResource HexDotsBrush}" CornerRadius="28" IsHitTestVisible="False" OpacityMask="{StaticResource HexDotsFade}" />
+
+            <StackPanel Width="380" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Image Width="64" Height="64" Source="/Resources/mark.png" Stretch="Uniform" />
+
+                <TextBlock x:Name="TitleText"
+                           Margin="0,20,0,0"
+                           HorizontalAlignment="Center"
+                           FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}"
+                           Text="Setting Up Colitu VPN" />
+
+                <TextBlock x:Name="SubText"
+                           Margin="0,10,0,28"
+                           HorizontalAlignment="Center"
+                           FontSize="14" Foreground="{StaticResource MutedBrush}"
+                           TextAlignment="Center" TextWrapping="Wrap"
+                           Text="Installing required VPN core files..." />
+
+                <ProgressBar x:Name="SetupProgress"
+                             Width="320" Height="6"
+                             Maximum="100" Minimum="0" Value="0">
+                    <ProgressBar.Template>
+                        <ControlTemplate TargetType="ProgressBar">
+                            <Grid>
+                                <Border x:Name="PART_Track" Background="{StaticResource Glass10Brush}" CornerRadius="3" />
+                                <Border x:Name="PART_Indicator" HorizontalAlignment="Left" Background="{StaticResource ActionBrush}" CornerRadius="3" />
+                            </Grid>
+                        </ControlTemplate>
+                    </ProgressBar.Template>
+                </ProgressBar>
+
+                <TextBlock x:Name="StatusText"
+                           Margin="0,14,0,0"
+                           HorizontalAlignment="Center"
+                           FontSize="12" Foreground="{StaticResource LilacBrush}"
+                           Text="Preparing..." />
+
+                <TextBlock x:Name="ErrorText"
+                           Margin="0,16,0,0"
+                           HorizontalAlignment="Center"
+                           FontSize="12" Foreground="{StaticResource DangerBrush}"
+                           TextAlignment="Center" TextWrapping="Wrap"
+                           Visibility="Collapsed" />
+
+                <Button x:Name="RetryButton"
+                        Width="160" Height="46"
+                        Margin="0,18,0,0"
+                        HorizontalAlignment="Center"
+                        Click="RetryButton_Click"
+                        Content="Retry"
+                        Style="{StaticResource PrimaryButton}"
+                        Visibility="Collapsed" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

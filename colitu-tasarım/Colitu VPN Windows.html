@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Colitu VPN — Windows Desktop</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;background:#0A0C14;font-family:'DM Sans',sans-serif;overflow:hidden;}
+body{display:flex;align-items:center;justify-content:center;}
+input{outline:none;-webkit-appearance:none;}
+input::placeholder{color:#3D4A64;}
+.scroll-y{overflow-y:auto;overflow-x:hidden;}
+.scroll-y::-webkit-scrollbar{width:4px;}
+.scroll-y::-webkit-scrollbar-track{background:transparent;}
+.scroll-y::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:4px;}
+.scroll-y::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.14);}
+@keyframes pulse{0%{transform:scale(0.9);opacity:0.5;}100%{transform:scale(1.6);opacity:0;}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+@keyframes shimmer{0%{opacity:0.4;}50%{opacity:1;}100%{opacity:0.4;}}
+@keyframes ringExpand{0%{transform:scale(1);opacity:0.6;}100%{transform:scale(1.8);opacity:0;}}
+@keyframes orbPop{0%{transform:scale(0.85);opacity:0;}100%{transform:scale(1);opacity:1;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ─── TOKENS ─────────────────────────────────────────── */
+const C = {
+  base:'#05070B', surface:'#0C0F17', elevated:'#111318',
+  sidebar:'#080B12',
+  cyan:'#60A5FA', blue:'#315CFF', purple:'#8B7FFF',
+  grad:'linear-gradient(135deg,#60A5FA 0%,#315CFF 50%,#8B7FFF 100%)',
+  gradCTA:'linear-gradient(135deg,#60A5FA 0%,#315CFF 100%)',
+  fg1:'#F0F4FF', fg2:'#7D8AA8', fg3:'#3D4A64',
+  success:'#00E5A0', danger:'#FF4D6A', warning:'#FFB547',
+  border:'rgba(255,255,255,0.07)', borderStrong:'rgba(255,255,255,0.13)',
+};
+
+/* ─── ICONS ───────────────────────────────────────────── */
+const PATHS = {
+  home:<><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><polyline points="9 21 9 12 15 12 15 21"/></>,
+  map:<><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></>,
+  settings:<><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
+  shield:<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>,
+  'chevron-right':<polyline points="9 18 15 12 9 6"/>,
+  search:<><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></>,
+  check:<polyline points="20 6 9 12 4 9"/>,
+  wifi:<><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></>,
+  lock:<><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
+  zap:<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>,
+  globe:<><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></>,
+  user:<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
+  'log-out':<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>,
+  eye:<><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>,
+  'eye-off':<><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></>,
+  mail:<><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></>,
+  star:<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>,
+  bell:<><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>,
+  activity:<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>,
+  help:<><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></>,
+  info:<><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></>,
+  'credit-card':<><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></>,
+  x:<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>,
+  'check-circle':<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>,
+  phone:<><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.74a16 16 0 0 0 6.19 6.19l.84-.85a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></>,
+  trash2:<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></>,
+  minimize:<line x1="4" y1="12" x2="20" y2="12"/>,
+  maximize:<rect x="3" y="3" width="18" height="18" rx="2"/>,
+  close:<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>,
+  download:<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>,
+};
+const Icon = ({ name, size=18, color='currentColor', sw=1.6 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" style={{flexShrink:0}}>
+    {PATHS[name]}
+  </svg>
+);
+
+/* ─── SHARED ──────────────────────────────────────────── */
+const Toggle = ({ on, onChange }) => (
+  <div onClick={()=>onChange(!on)} style={{width:42,height:24,borderRadius:12,cursor:'pointer',flexShrink:0,background:on?C.gradCTA:'rgba(255,255,255,0.08)',position:'relative',transition:'background 0.2s',boxShadow:on?'0 4px 14px rgba(49,92,255,0.3)':'none'}}>
+    <div style={{position:'absolute',top:2,left:on?20:2,width:20,height:20,borderRadius:'50%',background:'#fff',transition:'left 0.2s cubic-bezier(0.25,0,0,1)',boxShadow:'0 1px 4px rgba(0,0,0,0.4)'}}/>
+  </div>
+);
+
+const SectionLabel = ({ children }) => (
+  <div style={{fontSize:10,fontWeight:600,letterSpacing:'0.08em',textTransform:'uppercase',color:C.fg3,marginBottom:8,paddingLeft:2}}>{children}</div>
+);
+
+const Card = ({ children, style={}, onClick }) => (
+  <div onClick={onClick} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,overflow:'hidden',...style,cursor:onClick?'pointer':undefined}}>
+    {children}
+  </div>
+);
+
+const Row = ({ icon, iconColor=C.fg2, label, sub, right, last, onClick, danger }) => (
+  <div onClick={onClick} style={{display:'flex',alignItems:'center',gap:12,padding:'11px 14px',borderBottom:last?'none':`1px solid rgba(255,255,255,0.04)`,cursor:onClick?'pointer':'default',transition:'background 0.1s'}}>
+    {icon && (
+      <div style={{width:30,height:30,borderRadius:8,background:C.elevated,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+        <Icon name={icon} size={15} color={danger?C.danger:iconColor}/>
+      </div>
+    )}
+    <div style={{flex:1}}>
+      <div style={{fontSize:13,fontWeight:500,color:danger?C.danger:C.fg1}}>{label}</div>
+      {sub && <div style={{fontSize:11,color:C.fg2,marginTop:1}}>{sub}</div>}
+    </div>
+    {right}
+  </div>
+);
+
+const getPingColor = (ping) => {
+  const ms = parseInt(ping);
+  if(ms < 80)  return C.success;
+  if(ms < 200) return C.warning;
+  return C.danger;
+};
+
+/* ─── SERVER DATA ─────────────────────────────────────── */
+const FREE_SERVERS = [
+  {id:'estonia', city:'Estonia',     country:'Estonia',     flag:'🇪🇪', ping:'115ms', free:true},
+  {id:'sweden',  city:'Sweden',      country:'Sweden',      flag:'🇸🇪', ping:'482ms', free:true},
+  {id:'swiss',   city:'Switzerland', country:'Switzerland', flag:'🇨🇭', ping:'471ms', free:true},
+];
+const PRO_SERVERS = [
+  {id:'finland',   city:'Finland',       country:'Finland',       flag:'🇫🇮', ping:'122ms', pro:true, tag:'fastest'},
+  {id:'tokyo',     city:'Tokyo',         country:'Japan',         flag:'🇯🇵', ping:'4ms',   pro:true, tag:'recommended'},
+  {id:'ny',        city:'New York',      country:'United States', flag:'🇺🇸', ping:'12ms',  pro:true},
+  {id:'toronto',   city:'Toronto',       country:'Canada',        flag:'🇨🇦', ping:'15ms',  pro:true},
+  {id:'london',    city:'London',        country:'United Kingdom',flag:'🇬🇧', ping:'28ms',  pro:true},
+  {id:'paris',     city:'Paris',         country:'France',        flag:'🇫🇷', ping:'29ms',  pro:true},
+  {id:'frankfurt', city:'Frankfurt',     country:'Germany',       flag:'🇩🇪', ping:'31ms',  pro:true},
+  {id:'amsterdam', city:'Amsterdam',     country:'Netherlands',   flag:'🇳🇱', ping:'33ms',  pro:true, tag:'p2p'},
+  {id:'singapore', city:'Singapore',     country:'Singapore',     flag:'🇸🇬', ping:'47ms',  pro:true, tag:'streaming'},
+  {id:'seoul',     city:'Seoul',         country:'South Korea',   flag:'🇰🇷', ping:'8ms',   pro:true},
+];
+const ALL_SERVERS = [...FREE_SERVERS,...PRO_SERVERS];
+
+/* ─── WINDOWS TITLE BAR ───────────────────────────────── */
+const TitleBar = () => (
+  <div style={{height:32,background:'#050709',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,borderBottom:`1px solid rgba(255,255,255,0.05)`,WebkitAppRegion:'drag',userSelect:'none'}}>
+    <div style={{display:'flex',alignItems:'center',gap:8,paddingLeft:14}}>
+      <img src="assets/colitu-icon.png" style={{width:16,height:16,objectFit:'contain',opacity:0.85}}/>
+      <span style={{fontSize:12,color:C.fg3,fontFamily:"'DM Sans'",fontWeight:400,letterSpacing:'0.02em'}}>Colitu VPN</span>
+    </div>
+    <div style={{display:'flex',alignItems:'center',WebkitAppRegion:'no-drag'}}>
+      {[{icon:'minimize',hover:'rgba(255,255,255,0.08)'},{icon:'maximize',hover:'rgba(255,255,255,0.08)'},{icon:'close',hover:'#E81123'}].map((btn,i)=>(
+        <div key={i} style={{width:46,height:32,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',transition:'background 0.1s'}}
+          onMouseEnter={e=>e.currentTarget.style.background=btn.hover}
+          onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+          <Icon name={btn.icon} size={11} color={C.fg2} sw={1.5}/>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+/* ─── SIDEBAR NAV ─────────────────────────────────────── */
+const NAV_ITEMS = [
+  {id:'home',      icon:'home',     label:'Home'},
+  {id:'locations', icon:'map',      label:'Locations'},
+  {id:'account',   icon:'user',     label:'Account'},
+  {id:'help',      icon:'help',     label:'Help & FAQ'},
+  {id:'support',   icon:'mail',     label:'Support'},
+  {id:'notifications', icon:'bell', label:'Notifications'},
+  {id:'settings',  icon:'settings', label:'Settings'},
+];
+
+const Sidebar = ({ active, onNavigate, isPro, userExpanded, setUserExpanded }) => (
+  <div style={{width:220,background:C.sidebar,borderRight:`1px solid rgba(255,255,255,0.055)`,display:'flex',flexDirection:'column',flexShrink:0}}>
+    {/* Logo */}
+    <div style={{padding:'24px 20px 20px',borderBottom:`1px solid rgba(255,255,255,0.05)`}}>
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <div style={{width:36,height:36,borderRadius:10,background:'linear-gradient(135deg,#111620,#0C0F17)',border:`1px solid rgba(255,255,255,0.1)`,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 0 20px rgba(96,165,250,0.1)'}}>
+          <img src="assets/colitu-icon.png" style={{width:22,height:22,objectFit:'contain'}}/>
+        </div>
+        <div>
+          <div style={{fontFamily:"'Space Grotesk'",fontSize:16,fontWeight:700,color:C.fg1,letterSpacing:'-0.02em'}}>colitu</div>
+          <div style={{fontSize:10,color:C.fg3,letterSpacing:'0.06em',textTransform:'uppercase'}}>{isPro?'Premium VPN':'Free Plan'}</div>
+        </div>
+      </div>
+    </div>
+    {/* Nav */}
+    <nav className="scroll-y" style={{flex:1,padding:'12px 10px',overflowY:'auto'}}>
+      {NAV_ITEMS.map(item=>{
+        const isActive = active === item.id;
+        return (
+          <div key={item.id} onClick={()=>onNavigate(item.id)} style={{
+            display:'flex',alignItems:'center',gap:10,
+            padding:'9px 12px',borderRadius:10,marginBottom:2,
+            cursor:'pointer',
+            background:isActive?'rgba(49,92,255,0.14)':'transparent',
+            border:isActive?`1px solid rgba(49,92,255,0.25)`:'1px solid transparent',
+            transition:'all 0.15s',
+          }}>
+            <Icon name={item.icon} size={17} color={isActive?C.cyan:C.fg3}/>
+            <span style={{fontSize:13,fontWeight:isActive?600:400,color:isActive?C.fg1:C.fg2}}>{item.label}</span>
+            {isActive && <div style={{marginLeft:'auto',width:4,height:4,borderRadius:'50%',background:C.cyan}}/>}
+          </div>
+        );
+      })}
+    </nav>
+    {/* User card — expandable */}
+    <div style={{padding:'10px 12px',borderTop:`1px solid rgba(255,255,255,0.05)`}}>
+      {/* Collapsed row */}
+      <div
+        onClick={()=>setUserExpanded(v=>!v)}
+        style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',borderRadius:10,cursor:'pointer',background:userExpanded?'rgba(255,255,255,0.05)':'transparent',transition:'background 0.15s'}}
+        onMouseEnter={e=>{ if(!userExpanded) e.currentTarget.style.background='rgba(255,255,255,0.04)'; }}
+        onMouseLeave={e=>{ if(!userExpanded) e.currentTarget.style.background='transparent'; }}
+      >
+        <div style={{width:30,height:30,borderRadius:8,background:isPro?C.gradCTA:'rgba(255,255,255,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+          <Icon name="user" size={15} color="#fff"/>
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12,fontWeight:600,color:C.fg1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>Alex Johnson</div>
+          <div style={{fontSize:10,color:C.fg3,marginTop:1}}>{isPro?'PRO Member':'Free Plan'}</div>
+        </div>
+        <div style={{transform:userExpanded?'rotate(90deg)':'rotate(0deg)',transition:'transform 0.2s',flexShrink:0}}>
+          <Icon name="chevron-right" size={13} color={C.fg3}/>
+        </div>
+      </div>
+      {/* Expanded panel */}
+      {userExpanded && (
+        <div style={{marginTop:8,background:C.elevated,borderRadius:10,border:`1px solid ${C.border}`,overflow:'hidden',animation:'fadeIn 0.15s ease'}}>
+          <div style={{padding:'12px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`}}>
+            <div style={{fontSize:11,color:C.fg3,marginBottom:2}}>Email</div>
+            <div style={{fontSize:12,color:C.fg1,fontWeight:500}}>alex@example.com</div>
+          </div>
+          <div style={{padding:'12px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`}}>
+            <div style={{fontSize:11,color:C.fg3,marginBottom:2}}>Plan</div>
+            <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <span style={{fontSize:12,color:C.fg1,fontWeight:500}}>{isPro?'Pro — Renews May 27':'Free'}</span>
+              {isPro && <span style={{fontSize:9,fontWeight:700,padding:'1px 6px',borderRadius:4,background:C.gradCTA,color:'#fff'}}>PRO</span>}
+            </div>
+          </div>
+          <div style={{padding:'12px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`}}>
+            <div style={{fontSize:11,color:C.fg3,marginBottom:2}}>Devices</div>
+            <div style={{fontSize:12,color:C.fg1,fontWeight:500}}>{isPro?'2 / 5 connected':'1 / 1 connected'}</div>
+          </div>
+          <div style={{padding:'10px 14px',display:'flex',gap:8}}>
+            {!isPro && (
+              <div onClick={()=>onNavigate('settings')} style={{flex:1,padding:'7px',borderRadius:8,background:C.gradCTA,color:'#fff',fontSize:11,fontWeight:600,textAlign:'center',cursor:'pointer',boxShadow:'0 2px 10px rgba(49,92,255,0.3)'}}>Upgrade to Pro</div>
+            )}
+            <div onClick={()=>onNavigate('settings')} style={{flex:1,padding:'7px',borderRadius:8,background:'rgba(255,77,106,0.1)',border:'1px solid rgba(255,77,106,0.2)',color:C.danger,fontSize:11,fontWeight:600,textAlign:'center',cursor:'pointer'}}>Sign Out</div>
+          </div>
+        </div>
+      )}
+    </div>
+  </div>
+);
+
+/* ─── HOME SCREEN ─────────────────────────────────────── */
+const HomeScreen = ({ appState, setAppState, onNavigate, isPro }) => {
+  const { connected, connecting, selectedServer } = appState;
+  const server = selectedServer || {city:'Tokyo',country:'Japan',flag:'🇯🇵',ping:'4ms'};
+  const [killSwitch, setKillSwitch] = useState(true);
+  const [autoConnect, setAutoConnect] = useState(false);
+  const dataUsed = 847; // MB used (for free plan)
+  const dataLimit = 10240; // 10 GB
+  const dataPct = Math.round(dataUsed/dataLimit*100);
+
+  const handleToggle = () => {
+    if(connected){ setAppState(s=>({...s,connected:false})); return; }
+    if(connecting) return;
+    setAppState(s=>({...s,connecting:true}));
+    setTimeout(()=>setAppState(s=>({...s,connecting:false,connected:true})),1800);
+  };
+
+  const statusText  = connected ? 'Connected' : connecting ? 'Connecting…' : 'Not Protected';
+  const statusColor = connected ? C.success : connecting ? C.cyan : C.danger;
+  const orbColor    = connected ? C.success : connecting ? C.cyan : C.danger;
+
+  return (
+    <div style={{flex:1,display:'flex',height:'100%',overflow:'hidden'}}>
+      {/* Center — orb */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:28,padding:'32px 40px',position:'relative'}}>
+        <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',width:380,height:380,borderRadius:'50%',background:connected?'radial-gradient(circle,rgba(0,229,160,0.04) 0%,transparent 70%)':connecting?'radial-gradient(circle,rgba(96,165,250,0.04) 0%,transparent 70%)':'radial-gradient(circle,rgba(255,77,106,0.03) 0%,transparent 70%)',pointerEvents:'none',transition:'background 0.5s'}}/>
+
+        <div onClick={handleToggle} style={{position:'relative',width:196,height:196,cursor:'pointer',flexShrink:0}}>
+          {(connected||connecting)&&[1,2].map(i=>(
+            <div key={i} style={{position:'absolute',inset:0,borderRadius:'50%',border:`1px solid ${orbColor}`,opacity:0,animation:`pulse ${1.4+i*0.4}s ease-out infinite ${i*0.3}s`}}/>
+          ))}
+          <div style={{position:'absolute',inset:18,borderRadius:'50%',
+            background:connected?'radial-gradient(circle at 35% 35%,#00C98A,#006644)':connecting?'radial-gradient(circle at 35% 35%,#2A6FBF,#0F3060)':'radial-gradient(circle at 35% 35%,#1A1E28,#0D1018)',
+            border:`1.5px solid ${orbColor}`,
+            boxShadow:`0 8px 40px rgba(0,0,0,0.6), 0 0 ${connected?'40px':'20px'} ${connected?'rgba(0,229,160,0.18)':connecting?'rgba(96,165,250,0.12)':'rgba(255,77,106,0.08)'}`,
+            display:'flex',alignItems:'center',justifyContent:'center',
+            transition:'all 0.5s cubic-bezier(0.25,0,0,1)',
+          }}>
+            <Icon name="shield" size={58} color={connected?'#fff':connecting?C.cyan:C.danger} sw={1.4}/>
+          </div>
+        </div>
+
+        <div style={{textAlign:'center'}}>
+          <div style={{fontSize:22,fontFamily:"'Space Grotesk'",fontWeight:700,color:statusColor,letterSpacing:'-0.02em',transition:'color 0.3s'}}>{statusText}</div>
+          <div style={{fontSize:13,color:C.fg3,marginTop:4}}>{connected?'Your connection is encrypted':'Click the orb to connect'}</div>
+        </div>
+
+        {connected && (
+          <div style={{display:'flex',gap:14,animation:'fadeIn 0.35s ease'}}>
+            {[['↓','94.2 Mbps',C.success],['↑','41.8 Mbps',C.cyan]].map(([dir,val,col])=>(
+              <div key={dir} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:'12px 20px',textAlign:'center'}}>
+                <div style={{fontSize:11,color:C.fg3,marginBottom:4}}>{dir==='↓'?'Download':'Upload'}</div>
+                <div style={{fontSize:16,fontFamily:"'JetBrains Mono'",fontWeight:500,color:col}}>{val}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Free plan — data usage bar */}
+        {!isPro && (
+          <div style={{width:'100%',maxWidth:340,background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:'14px 16px',animation:'fadeIn 0.3s ease'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <span style={{fontSize:12,color:C.fg2,fontWeight:500}}>Free Data Used</span>
+              <span style={{fontSize:12,fontFamily:"'JetBrains Mono'",color:C.fg1}}>{(dataUsed/1024).toFixed(1)} / {dataLimit/1024} GB</span>
+            </div>
+            <div style={{height:5,background:'rgba(255,255,255,0.07)',borderRadius:3,overflow:'hidden',marginBottom:10}}>
+              <div style={{height:'100%',width:`${dataPct}%`,borderRadius:3,background:`linear-gradient(90deg,${C.success},${C.cyan})`,transition:'width 0.5s'}}/>
+            </div>
+            <div onClick={()=>onNavigate('settings')} style={{width:'100%',padding:'9px',borderRadius:9,background:C.gradCTA,color:'#fff',fontFamily:"'DM Sans'",fontSize:13,fontWeight:600,textAlign:'center',cursor:'pointer',boxShadow:'0 3px 12px rgba(49,92,255,0.3)'}}>
+              Upgrade to Pro — Unlimited Data
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Right panel */}
+      <div style={{width:288,borderLeft:`1px solid rgba(255,255,255,0.055)`,display:'flex',flexDirection:'column',padding:'24px 20px',gap:18,overflow:'hidden'}}>
+        {/* Server card */}
+        <div>
+          <SectionLabel>Active Server</SectionLabel>
+          <div onClick={()=>onNavigate('locations')} style={{background:C.surface,border:`1px solid ${connected?'rgba(0,229,160,0.18)':C.border}`,borderRadius:14,padding:'14px',display:'flex',alignItems:'center',gap:12,cursor:'pointer',transition:'border-color 0.3s'}}>
+            <div style={{width:42,height:42,borderRadius:12,background:C.elevated,display:'flex',alignItems:'center',justifyContent:'center',fontSize:24,flexShrink:0}}>{server.flag}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:14,fontWeight:600,color:C.fg1,fontFamily:"'Space Grotesk'"}}>{server.city}</div>
+              <div style={{fontSize:11,color:C.fg2,marginTop:2}}>{server.ping} latency</div>
+            </div>
+            <Icon name="chevron-right" size={16} color={C.fg3}/>
+          </div>
+        </div>
+
+        {/* Quick toggles */}
+        <div>
+          <SectionLabel>Quick Settings</SectionLabel>
+          <Card>
+            <Row icon="zap" label="Kill Switch" sub="Block traffic on drop" right={<Toggle on={killSwitch} onChange={setKillSwitch}/>}/>
+            <Row icon="wifi" label="Auto-Connect" sub="On unsecured Wi-Fi" right={<Toggle on={autoConnect} onChange={setAutoConnect}/>} last/>
+          </Card>
+        </div>
+
+        {/* Pro upsell for free users */}
+        {!isPro && (
+          <div style={{background:'linear-gradient(135deg,rgba(49,92,255,0.12),rgba(139,127,255,0.08))',border:`1px solid rgba(49,92,255,0.22)`,borderRadius:14,padding:'14px 14px'}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.fg1,marginBottom:4,fontFamily:"'Space Grotesk'"}}>Unlock Pro Features</div>
+            <div style={{fontSize:11,color:C.fg2,lineHeight:1.6,marginBottom:10}}>90+ countries, unlimited data, Kill Switch & priority support.</div>
+            {['90+ server locations','Unlimited data','Kill Switch','5 devices'].map(f=>(
+              <div key={f} style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                <div style={{width:14,height:14,borderRadius:'50%',background:'rgba(0,229,160,0.15)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                  <Icon name="check" size={9} color={C.success} sw={2.5}/>
+                </div>
+                <span style={{fontSize:11,color:C.fg2}}>{f}</span>
+              </div>
+            ))}
+            <div onClick={()=>onNavigate('settings')} style={{marginTop:12,width:'100%',padding:'9px',borderRadius:9,background:C.gradCTA,color:'#fff',fontFamily:"'DM Sans'",fontSize:13,fontWeight:600,textAlign:'center',cursor:'pointer',boxShadow:'0 3px 12px rgba(49,92,255,0.3)'}}>Get Pro — $4.99/mo</div>
+          </div>
+        )}
+
+        {/* Pro: protocol info */}
+        {isPro && (
+          <div style={{marginTop:'auto'}}>
+            <SectionLabel>Protocol</SectionLabel>
+            <Card>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px',borderBottom:`1px solid rgba(255,255,255,0.04)`}}>
+                <span style={{fontSize:12,color:C.fg2}}>Protocol</span>
+                <span style={{fontSize:12,fontWeight:600,color:C.fg1,fontFamily:"'JetBrains Mono'"}}>WireGuard</span>
+              </div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 14px'}}>
+                <span style={{fontSize:12,color:C.fg2}}>Encryption</span>
+                <span style={{fontSize:12,fontWeight:600,color:C.fg1,fontFamily:"'JetBrains Mono'"}}>AES-256</span>
+              </div>
+            </Card>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ─── LOCATIONS SCREEN ────────────────────────────────── */
+const LocationsScreen = ({ appState, setAppState, onNavigate }) => {
+  const [search, setSearch] = useState('');
+  const [pinging, setPinging] = useState(false);
+  const [pingAnim, setPingAnim] = useState(false);
+  const selected = appState.selectedServer?.id || 'finland';
+
+  const matchSearch = s => !search ||
+    s.city.toLowerCase().includes(search.toLowerCase()) ||
+    s.country.toLowerCase().includes(search.toLowerCase());
+
+  const filteredFree = FREE_SERVERS.filter(matchSearch);
+  const filteredPro  = PRO_SERVERS.filter(matchSearch);
+
+  const handlePingAll = () => {
+    setPingAnim(true); setPinging(true);
+    setTimeout(()=>{ setPinging(false); setPingAnim(false); }, 1800);
+  };
+
+  const handleBestServer = () => {
+    const best = ALL_SERVERS.reduce((a,b)=>parseInt(a.ping)<parseInt(b.ping)?a:b);
+    setAppState(a=>({...a,selectedServer:best}));
+    setTimeout(()=>onNavigate('home'),300);
+  };
+
+  const selectServer = (s) => {
+    setAppState(a=>({...a,selectedServer:s}));
+    setTimeout(()=>onNavigate('home'),260);
+  };
+
+  const ServerRow = ({s, last}) => {
+    const isSel = s.id === selected;
+    const pingColor = getPingColor(s.ping);
+    return (
+      <div onClick={()=>selectServer(s)} style={{display:'flex',alignItems:'center',gap:12,padding:'11px 16px',borderBottom:last?'none':`1px solid rgba(255,255,255,0.04)`,cursor:'pointer',background:isSel?'rgba(49,92,255,0.07)':'transparent',transition:'background 0.12s'}}>
+        <div style={{width:34,height:34,borderRadius:9,background:C.elevated,display:'flex',alignItems:'center',justifyContent:'center',fontSize:19,flexShrink:0}}>{s.flag}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:600,color:C.fg1,fontFamily:"'Space Grotesk'",marginBottom:3}}>{s.city}</div>
+          {s.free
+            ? <span style={{fontSize:10,fontWeight:700,color:C.success,background:'rgba(0,229,160,0.1)',border:'1px solid rgba(0,229,160,0.28)',padding:'1px 7px',borderRadius:5}}>FREE</span>
+            : <span style={{fontSize:10,fontWeight:700,color:'#F59E0B',background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.28)',padding:'1px 7px',borderRadius:5}}>PRO</span>
+          }
+        </div>
+        <div style={{fontFamily:"'JetBrains Mono'",fontSize:11,fontWeight:500,color:pingAnim?C.fg3:pingColor,background:`${pingAnim?'rgba(255,255,255,0.05)':pingColor+'12'}`,padding:'3px 9px',borderRadius:6,flexShrink:0,minWidth:52,textAlign:'center',transition:'color 0.3s'}}>
+          {pingAnim?'···':s.ping}
+        </div>
+        {isSel
+          ? <div style={{width:20,height:20,borderRadius:'50%',background:C.gradCTA,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:'0 0 10px rgba(49,92,255,0.35)'}}><Icon name="check" size={10} color="#fff" sw={2.5}/></div>
+          : <div style={{width:20,height:20,borderRadius:'50%',border:`1.5px solid rgba(255,255,255,0.1)`,flexShrink:0}}/>
+        }
+      </div>
+    );
+  };
+
+  return (
+    <div style={{flex:1,display:'flex',height:'100%',overflow:'hidden'}}>
+      {/* Main list */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+        {/* Top bar */}
+        <div style={{padding:'20px 24px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`,flexShrink:0,display:'flex',alignItems:'center',gap:14}}>
+          <div style={{flex:1,position:'relative'}}>
+            <div style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)'}}>
+              <Icon name="search" size={14} color={C.fg3}/>
+            </div>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search locations…" style={{width:'100%',background:C.elevated,border:`1px solid ${C.border}`,borderRadius:10,padding:'9px 12px 9px 34px',fontFamily:"'DM Sans'",fontSize:13,color:C.fg1}}/>
+          </div>
+          <button onClick={handlePingAll} style={{padding:'9px 16px',borderRadius:10,border:`1px solid ${C.borderStrong}`,background:'rgba(255,255,255,0.04)',color:pinging?C.cyan:C.fg1,fontFamily:"'DM Sans'",fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',gap:6,flexShrink:0,transition:'color 0.2s'}}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{animation:pinging?'spin 0.8s linear infinite':'none'}}>
+              <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.44-5.47"/>
+            </svg>
+            Ping All
+          </button>
+        </div>
+
+        <div className="scroll-y" style={{flex:1,padding:'16px 24px'}}>
+          {/* FREE */}
+          {filteredFree.length > 0 && (
+            <div style={{marginBottom:20}}>
+              <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:10}}>
+                <div style={{width:6,height:6,borderRadius:'50%',background:C.success,boxShadow:`0 0 5px ${C.success}`}}/>
+                <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',color:C.success,whiteSpace:'nowrap'}}>Free Servers</span>
+              </div>
+              <Card>
+                {filteredFree.map((s,i)=><ServerRow key={s.id} s={s} last={i===filteredFree.length-1}/>)}
+              </Card>
+            </div>
+          )}
+          {/* PRO */}
+          {filteredPro.length > 0 && (
+            <div style={{marginBottom:20}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+                <div style={{display:'flex',alignItems:'center',gap:7}}>
+                  <div style={{width:6,height:6,borderRadius:'50%',background:'#F59E0B',boxShadow:`0 0 5px #F59E0B`}}/>
+                  <span style={{fontSize:10,fontWeight:700,letterSpacing:'0.06em',textTransform:'uppercase',color:'#F59E0B',whiteSpace:'nowrap'}}>Pro Servers · {PRO_SERVERS.length} Countries</span>
+                </div>
+                <div onClick={()=>onNavigate('settings')} style={{fontSize:10,fontWeight:600,color:C.cyan,cursor:'pointer',padding:'2px 9px',borderRadius:99,background:'rgba(96,165,250,0.1)',border:'1px solid rgba(96,165,250,0.2)'}}>Upgrade</div>
+              </div>
+              <Card>
+                {filteredPro.map((s,i)=><ServerRow key={s.id} s={s} last={i===filteredPro.length-1}/>)}
+              </Card>
+            </div>
+          )}
+          {filteredFree.length===0 && filteredPro.length===0 && (
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:10,padding:'80px 0'}}>
+              <Icon name="search" size={28} color={C.fg3}/>
+              <div style={{fontSize:14,color:C.fg2}}>No results for "{search}"</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Right: Best Server panel */}
+      <div style={{width:280,borderLeft:`1px solid rgba(255,255,255,0.055)`,padding:'24px 20px',display:'flex',flexDirection:'column',gap:16,flexShrink:0}}>
+        <div style={{fontSize:13,fontWeight:600,color:C.fg1,fontFamily:"'Space Grotesk'"}}>Best Server</div>
+
+        {/* Card */}
+        <div style={{background:'linear-gradient(135deg,rgba(49,92,255,0.14),rgba(96,165,250,0.07))',border:`1px solid rgba(49,92,255,0.24)`,borderRadius:14,padding:'18px 16px',display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{width:44,height:44,borderRadius:13,background:C.gradCTA,display:'flex',alignItems:'center',justifyContent:'center',boxShadow:'0 4px 18px rgba(49,92,255,0.4)'}}>
+            <Icon name="zap" size={22} color="#fff" sw={1.8}/>
+          </div>
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:C.fg1,fontFamily:"'Space Grotesk'",marginBottom:6}}>Auto-connect</div>
+            <div style={{fontSize:12,color:C.fg2,lineHeight:1.6}}>Automatically connects you to the fastest available server based on real-time ping.</div>
+          </div>
+          <button onClick={handleBestServer} style={{width:'100%',padding:'12px',borderRadius:10,border:'none',cursor:'pointer',background:C.gradCTA,color:'#fff',fontFamily:"'DM Sans'",fontSize:14,fontWeight:600,boxShadow:'0 4px 14px rgba(49,92,255,0.35)'}}>
+            Connect to Best Server
+          </button>
+        </div>
+
+        {/* Ping legend */}
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.fg3,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:10}}>Ping Legend</div>
+          <div style={{display:'flex',flexDirection:'column',gap:7}}>
+            {[{color:C.success,label:'Excellent',range:'< 80ms'},{color:C.warning,label:'Good',range:'80–200ms'},{color:C.danger,label:'High',range:'> 200ms'}].map(p=>(
+              <div key={p.label} style={{display:'flex',alignItems:'center',gap:8}}>
+                <div style={{width:8,height:8,borderRadius:'50%',background:p.color,boxShadow:`0 0 4px ${p.color}`,flexShrink:0}}/>
+                <span style={{fontSize:12,color:C.fg2,flex:1}}>{p.label}</span>
+                <span style={{fontSize:11,fontFamily:"'JetBrains Mono'",color:C.fg3}}>{p.range}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Server count */}
+        <div style={{marginTop:'auto',background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:'12px 14px'}}>
+          <div style={{fontSize:11,color:C.fg3,marginBottom:4}}>Available Servers</div>
+          <div style={{display:'flex',gap:14}}>
+            <div>
+              <div style={{fontSize:18,fontWeight:700,color:C.success,fontFamily:"'Space Grotesk'"}}>{FREE_SERVERS.length}</div>
+              <div style={{fontSize:10,color:C.fg3}}>Free</div>
+            </div>
+            <div style={{width:1,background:C.border}}/>
+            <div>
+              <div style={{fontSize:18,fontWeight:700,color:'#F59E0B',fontFamily:"'Space Grotesk'"}}>{PRO_SERVERS.length}+</div>
+              <div style={{fontSize:10,color:C.fg3}}>Pro</div>
+            </div>
+            <div style={{width:1,background:C.border}}/>
+            <div>
+              <div style={{fontSize:18,fontWeight:700,color:C.fg1,fontFamily:"'Space Grotesk'"}}>90+</div>
+              <div style={{fontSize:10,color:C.fg3}}>Countries</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── SETTINGS SCREEN ─────────────────────────────────── */
+const SettingsScreen = ({ onNavigate, isPro }) => {
+  const [toggles,setToggles] = useState({killSwitch:true,autoConnect:false,dnsLeak:true,notifications:true,analytics:false});
+  const tog = key => setToggles(s=>({...s,[key]:!s[key]}));
+
+  return (
+    <div style={{flex:1,display:'flex',height:'100%',overflow:'hidden'}}>
+      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+        <div style={{padding:'20px 24px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`,flexShrink:0}}>
+          <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1}}>Settings</div>
+        </div>
+        <div className="scroll-y" style={{flex:1,padding:'20px 24px'}}>
+
+          {/* Free upsell banner */}
+          {!isPro && (
+            <div style={{background:'linear-gradient(135deg,rgba(49,92,255,0.14),rgba(139,127,255,0.08))',border:`1px solid rgba(49,92,255,0.25)`,borderRadius:14,padding:'16px',display:'flex',alignItems:'center',gap:14,marginBottom:20}}>
+              <div style={{width:40,height:40,borderRadius:11,background:C.gradCTA,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:'0 3px 12px rgba(49,92,255,0.35)'}}>
+                <Icon name="star" size={20} color="#fff"/>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:14,fontWeight:700,color:C.fg1,marginBottom:3}}>Upgrade to Pro</div>
+                <div style={{fontSize:11,color:C.fg2}}>Unlock 90+ countries, unlimited data & Kill Switch</div>
+              </div>
+              <div style={{padding:'8px 14px',borderRadius:9,background:C.gradCTA,color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0,boxShadow:'0 3px 10px rgba(49,92,255,0.3)'}}>$4.99/mo</div>
+            </div>
+          )}
+
+          {/* Account card */}
+          <div style={{background:'linear-gradient(135deg,rgba(49,92,255,0.1),rgba(139,127,255,0.08))',border:`1px solid rgba(49,92,255,0.2)`,borderRadius:14,padding:'16px',display:'flex',alignItems:'center',gap:14,marginBottom:20,cursor:'pointer'}}>
+            <div style={{width:46,height:46,borderRadius:13,background:isPro?C.gradCTA:'rgba(255,255,255,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:isPro?'0 4px 14px rgba(49,92,255,0.3)':'none'}}>
+              <Icon name="user" size={22} color="#fff"/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontSize:15,fontWeight:600,color:C.fg1}}>Alex Johnson</div>
+              <div style={{fontSize:12,color:C.fg2,marginTop:2}}>alex@example.com</div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:10,fontWeight:700,padding:'3px 8px',borderRadius:6,background:isPro?C.gradCTA:'rgba(255,255,255,0.1)',color:'#fff',letterSpacing:'0.04em'}}>{isPro?'PRO':'FREE'}</span>
+              <Icon name="chevron-right" size={15} color={C.fg3}/>
+            </div>
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
+            {/* Security */}
+            <div>
+              <SectionLabel>Security</SectionLabel>
+              <Card>
+                <Row icon="zap" label="Kill Switch" sub="Block traffic when VPN drops" right={<Toggle on={toggles.killSwitch} onChange={()=>tog('killSwitch')}/>}/>
+                <Row icon="shield" label="DNS Leak Protection" sub="Always active" right={<Toggle on={toggles.dnsLeak} onChange={()=>tog('dnsLeak')}/>} last/>
+              </Card>
+            </div>
+            {/* Connection */}
+            <div>
+              <SectionLabel>Connection</SectionLabel>
+              <Card>
+                <Row icon="wifi" label="Auto-Connect" sub="On unsecured Wi-Fi" right={<Toggle on={toggles.autoConnect} onChange={()=>tog('autoConnect')}/>}/>
+                <Row icon="bell" label="Notifications" sub="Connection status alerts" right={<Toggle on={toggles.notifications} onChange={()=>tog('notifications')}/>}/>
+                <Row icon="activity" label="Analytics" sub="Help improve Colitu" right={<Toggle on={toggles.analytics} onChange={()=>tog('analytics')}/>} last/>
+              </Card>
+            </div>
+          </div>
+
+          <div style={{marginTop:20}}>
+            <SectionLabel>Support</SectionLabel>
+            <Card>
+              <Row icon="help" label="Help & FAQ" right={<Icon name="chevron-right" size={15} color={C.fg3}/>} onClick={()=>{}}/>
+              <Row icon="info" label="About Colitu" right={<Icon name="chevron-right" size={15} color={C.fg3}/>} onClick={()=>{}} last/>
+            </Card>
+          </div>
+
+          <div style={{marginTop:20}}>
+            <Card style={{border:'1px solid rgba(255,77,106,0.15)'}}>
+              <Row icon="log-out" label="Sign Out" danger last onClick={()=>{}}/>
+            </Card>
+          </div>
+
+          <div style={{textAlign:'center',fontSize:11,color:C.fg3,marginTop:20}}>Colitu v3.1.0 · Build 2026.05</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── ACCOUNT SCREEN ──────────────────────────────────── */
+const AccountScreen = ({ isPro, onNavigate }) => {
+  const [showPwd, setShowPwd] = useState(false);
+  const [showNewPwd, setShowNewPwd] = useState(false);
+  const [name, setName] = useState('Alex Johnson');
+  const [email, setEmail] = useState('alex@example.com');
+  const [phone, setPhone] = useState('+1 415 555 0142');
+  const [saved, setSaved] = useState(false);
+
+  const fieldStyle = {
+    width:'100%',background:C.elevated,border:`1px solid ${C.border}`,borderRadius:10,
+    padding:'12px 14px',fontFamily:"'DM Sans'",fontSize:13,color:C.fg1,
+  };
+  const labelStyle = {fontSize:10,fontWeight:600,letterSpacing:'0.06em',textTransform:'uppercase',color:C.fg3,marginBottom:6,display:'block'};
+
+  const handleSave = () => { setSaved(true); setTimeout(()=>setSaved(false),1800); };
+
+  return (
+    <div style={{flex:1,display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+      <div style={{padding:'20px 28px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`,flexShrink:0}}>
+        <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1}}>Account</div>
+        <div style={{fontSize:12,color:C.fg2,marginTop:2}}>Manage your profile, plan and credentials</div>
+      </div>
+
+      <div className="scroll-y" style={{flex:1,padding:'22px 28px'}}>
+        {/* Profile hero card */}
+        <div style={{background:'linear-gradient(135deg,rgba(49,92,255,0.10),rgba(139,127,255,0.06))',border:`1px solid rgba(49,92,255,0.22)`,borderRadius:16,padding:'20px',display:'flex',alignItems:'center',gap:18,marginBottom:24,position:'relative',overflow:'hidden'}}>
+          <div style={{position:'absolute',top:-40,right:-40,width:180,height:180,borderRadius:'50%',background:'radial-gradient(circle,rgba(96,165,250,0.18),transparent 70%)',pointerEvents:'none'}}/>
+          <div style={{width:64,height:64,borderRadius:16,background:isPro?C.gradCTA:'rgba(255,255,255,0.1)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:isPro?'0 6px 22px rgba(49,92,255,0.4)':'none'}}>
+            <Icon name="user" size={30} color="#fff" sw={1.6}/>
+          </div>
+          <div style={{flex:1,minWidth:0,zIndex:1}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+              <div style={{fontFamily:"'Space Grotesk'",fontSize:20,fontWeight:700,color:C.fg1,letterSpacing:'-0.01em'}}>{name}</div>
+              <span style={{fontSize:9,fontWeight:700,padding:'3px 8px',borderRadius:5,background:isPro?C.gradCTA:'rgba(255,255,255,0.1)',color:'#fff',letterSpacing:'0.06em'}}>{isPro?'PRO MEMBER':'FREE'}</span>
+            </div>
+            <div style={{fontSize:12,color:C.fg2}}>{email}</div>
+          </div>
+          <div style={{display:'flex',gap:8,zIndex:1}}>
+            <div style={{textAlign:'center',padding:'8px 14px',background:'rgba(255,255,255,0.04)',borderRadius:10,border:`1px solid ${C.border}`,minWidth:80}}>
+              <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1}}>2/5</div>
+              <div style={{fontSize:10,color:C.fg3,letterSpacing:'0.05em',textTransform:'uppercase',marginTop:2}}>Devices</div>
+            </div>
+            <div style={{textAlign:'center',padding:'8px 14px',background:'rgba(255,255,255,0.04)',borderRadius:10,border:`1px solid ${C.border}`,minWidth:80}}>
+              <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.success}}>317</div>
+              <div style={{fontSize:10,color:C.fg3,letterSpacing:'0.05em',textTransform:'uppercase',marginTop:2}}>Days Left</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Plan info card */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:28}}>
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:'16px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.fg3,letterSpacing:'0.07em',textTransform:'uppercase'}}>Current Plan</div>
+              <Icon name="star" size={14} color="#F59E0B"/>
+            </div>
+            <div style={{fontFamily:"'Space Grotesk'",fontSize:17,fontWeight:700,color:C.fg1,marginBottom:4}}>Colitu Premium Yearly</div>
+            <div style={{fontSize:12,color:C.fg2,marginBottom:14}}>Unlimited traffic · 5 device limit</div>
+            <div style={{display:'flex',gap:8}}>
+              <button style={{flex:1,padding:'9px',borderRadius:9,border:`1px solid ${C.borderStrong}`,background:'rgba(255,255,255,0.04)',color:C.fg1,fontSize:12,fontWeight:600,cursor:'pointer'}}>Manage Plan</button>
+              <button style={{flex:1,padding:'9px',borderRadius:9,border:'none',background:C.gradCTA,color:'#fff',fontSize:12,fontWeight:600,cursor:'pointer',boxShadow:'0 3px 10px rgba(49,92,255,0.3)'}}>Renew</button>
+            </div>
+          </div>
+
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:'16px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.fg3,letterSpacing:'0.07em',textTransform:'uppercase'}}>Next Renewal</div>
+              <Icon name="credit-card" size={14} color={C.cyan}/>
+            </div>
+            <div style={{fontFamily:"'Space Grotesk'",fontSize:17,fontWeight:700,color:C.fg1,marginBottom:4}}>March 21, 2027</div>
+            <div style={{fontSize:12,color:C.fg2,marginBottom:14}}>Visa ending in 4242 · $59.88/yr</div>
+            <div style={{display:'flex',gap:8}}>
+              <button style={{flex:1,padding:'9px',borderRadius:9,border:`1px solid ${C.borderStrong}`,background:'rgba(255,255,255,0.04)',color:C.fg1,fontSize:12,fontWeight:600,cursor:'pointer'}}>Update Card</button>
+              <button style={{flex:1,padding:'9px',borderRadius:9,border:`1px solid ${C.border}`,background:'transparent',color:C.fg2,fontSize:12,fontWeight:600,cursor:'pointer'}}>Invoices</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Profile details */}
+        <SectionLabel>Profile Details</SectionLabel>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:'18px',marginBottom:20}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            <div>
+              <label style={labelStyle}>Display Name</label>
+              <input value={name} onChange={e=>setName(e.target.value)} style={fieldStyle}/>
+            </div>
+            <div>
+              <label style={labelStyle}>Email</label>
+              <input value={email} onChange={e=>setEmail(e.target.value)} style={fieldStyle}/>
+            </div>
+            <div>
+              <label style={labelStyle}>Phone</label>
+              <input value={phone} onChange={e=>setPhone(e.target.value)} style={fieldStyle}/>
+            </div>
+            <div>
+              <label style={labelStyle}>Account ID</label>
+              <input value="CLT-7842-93AX" readOnly style={{...fieldStyle,fontFamily:"'JetBrains Mono'",color:C.fg2}}/>
+            </div>
+          </div>
+          <div style={{display:'flex',justifyContent:'flex-end',marginTop:16,gap:8}}>
+            <button style={{padding:'10px 18px',borderRadius:9,border:`1px solid ${C.border}`,background:'transparent',color:C.fg2,fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
+            <button onClick={handleSave} style={{padding:'10px 22px',borderRadius:9,border:'none',background:saved?C.success:C.gradCTA,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',boxShadow:'0 3px 12px rgba(49,92,255,0.3)',display:'flex',alignItems:'center',gap:6,transition:'background 0.3s'}}>
+              {saved && <Icon name="check" size={13} color="#fff" sw={2.5}/>}
+              {saved?'Saved':'Save Profile'}
+            </button>
+          </div>
+        </div>
+
+        {/* Password */}
+        <SectionLabel>Change Password</SectionLabel>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:'18px',marginBottom:20}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
+            <div>
+              <label style={labelStyle}>Current Password</label>
+              <div style={{position:'relative'}}>
+                <input type={showPwd?'text':'password'} placeholder="••••••••••" style={fieldStyle}/>
+                <div onClick={()=>setShowPwd(!showPwd)} style={{position:'absolute',right:12,top:'50%',transform:'translateY(-50%)',cursor:'pointer'}}>
+                  <Icon name={showPwd?'eye-off':'eye'} size={15} color={C.fg3}/>
+                </div>
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>New Password</label>
+              <div style={{position:'relative'}}>
+                <input type={showNewPwd?'text':'password'} placeholder="At least 12 characters" style={fieldStyle}/>
+                <div onClick={()=>setShowNewPwd(!showNewPwd)} style={{position:'absolute',right:12,top:'50%',transform:'translateY(-50%)',cursor:'pointer'}}>
+                  <Icon name={showNewPwd?'eye-off':'eye'} size={15} color={C.fg3}/>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:14,marginTop:14}}>
+            <div style={{flex:1,fontSize:11,color:C.fg3}}>
+              Use 12+ characters with letters, numbers and symbols.
+            </div>
+            <button style={{padding:'10px 22px',borderRadius:9,border:'none',background:C.gradCTA,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',boxShadow:'0 3px 12px rgba(49,92,255,0.3)'}}>Change Password</button>
+          </div>
+        </div>
+
+        {/* Danger zone */}
+        <SectionLabel>Danger Zone</SectionLabel>
+        <div style={{background:C.surface,border:'1px solid rgba(255,77,106,0.15)',borderRadius:14,padding:'4px'}}>
+          <Row icon="log-out" label="Sign Out" sub="Sign out of this device" right={<Icon name="chevron-right" size={15} color={C.fg3}/>} onClick={()=>{}}/>
+          <Row icon="trash2" label="Delete Account" sub="Permanently remove your account" danger right={<Icon name="chevron-right" size={15} color={C.danger}/>} onClick={()=>{}} last/>
+        </div>
+        <div style={{height:20}}/>
+      </div>
+    </div>
+  );
+};
+
+/* ─── HELP & FAQ SCREEN ───────────────────────────────── */
+const FAQ_DATA = [
+  {q:'What is a VPN?', a:'A VPN encrypts your connection and routes your traffic through a secure server, masking your real IP address from third parties.', cat:'General'},
+  {q:'Does Colitu keep logs?', a:'No. Colitu is designed around a strict no-log VPN experience — we do not store browsing activity or connection metadata.', cat:'General'},
+  {q:'How many devices can I connect?', a:'With a Pro plan, you can connect up to 5 devices simultaneously. Free plans support a single device.', cat:'General'},
+  {q:'How do I cancel my subscription?', a:'Subscriptions can be managed and cancelled from your account settings or your platform store at any time.', cat:'Payment'},
+  {q:'Will Colitu slow my internet?', a:'A small overhead is normal for any VPN. Choose the closest server for the best speed — most users see negligible impact on Pro servers.', cat:'Technical'},
+  {q:'Which protocols are supported?', a:'WireGuard (recommended) and OpenVPN. WireGuard is enabled by default for the best balance of speed and security.', cat:'Technical'},
+  {q:'Can I get a refund?', a:'Yes — we offer a 30-day money-back guarantee on all annual plans, no questions asked.', cat:'Payment'},
+  {q:'Does Colitu work in restricted regions?', a:'Colitu uses obfuscated servers that bypass most network restrictions. Try the "Stealth" mode if normal connections are blocked.', cat:'Technical'},
+];
+const CATS = ['All','General','Payment','Technical'];
+
+const HelpScreen = ({ onNavigate }) => {
+  const [search, setSearch] = useState('');
+  const [cat, setCat] = useState('All');
+  const [open, setOpen] = useState(0);
+
+  const filtered = FAQ_DATA.filter(f => (cat==='All'||f.cat===cat) && (!search || f.q.toLowerCase().includes(search.toLowerCase()) || f.a.toLowerCase().includes(search.toLowerCase())));
+
+  return (
+    <div style={{flex:1,display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+      <div style={{padding:'20px 28px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`,flexShrink:0}}>
+        <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1}}>Help &amp; FAQ</div>
+        <div style={{fontSize:12,color:C.fg2,marginTop:2}}>Find answers to common questions</div>
+      </div>
+
+      <div className="scroll-y" style={{flex:1,padding:'22px 28px'}}>
+        {/* Search + categories */}
+        <div style={{display:'flex',gap:10,marginBottom:14}}>
+          <div style={{flex:1,position:'relative'}}>
+            <div style={{position:'absolute',left:14,top:'50%',transform:'translateY(-50%)'}}>
+              <Icon name="search" size={15} color={C.fg3}/>
+            </div>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search questions…" style={{width:'100%',background:C.elevated,border:`1px solid ${C.border}`,borderRadius:11,padding:'12px 14px 12px 38px',fontFamily:"'DM Sans'",fontSize:13,color:C.fg1}}/>
+          </div>
+          <button style={{padding:'12px 18px',borderRadius:11,border:`1px solid ${C.borderStrong}`,background:'rgba(255,255,255,0.04)',color:C.fg1,fontSize:13,fontWeight:500,cursor:'pointer'}}>Refresh</button>
+        </div>
+
+        <div style={{display:'flex',gap:8,marginBottom:18,flexWrap:'wrap'}}>
+          {CATS.map(c=>{
+            const isActive = cat===c;
+            return (
+              <div key={c} onClick={()=>setCat(c)} style={{padding:'7px 16px',borderRadius:99,fontSize:12,fontWeight:isActive?600:500,cursor:'pointer',background:isActive?'rgba(49,92,255,0.15)':'rgba(255,255,255,0.04)',border:`1px solid ${isActive?'rgba(49,92,255,0.35)':C.border}`,color:isActive?C.cyan:C.fg2,transition:'all 0.15s'}}>{c}</div>
+            );
+          })}
+          <div style={{flex:1}}/>
+          <div style={{fontSize:11,color:C.fg3,alignSelf:'center'}}>{filtered.length} {filtered.length===1?'result':'results'}</div>
+        </div>
+
+        {/* FAQ list */}
+        <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:24}}>
+          {filtered.map((f,i)=>{
+            const isOpen = open===i;
+            return (
+              <div key={i} onClick={()=>setOpen(isOpen?-1:i)} style={{background:C.surface,border:`1px solid ${isOpen?'rgba(49,92,255,0.25)':C.border}`,borderRadius:13,cursor:'pointer',transition:'all 0.2s',overflow:'hidden'}}>
+                <div style={{padding:'15px 18px',display:'flex',alignItems:'center',gap:12}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:isOpen?6:0}}>
+                      <div style={{fontSize:14,fontWeight:600,color:C.fg1,fontFamily:"'Space Grotesk'",flex:1}}>{f.q}</div>
+                      <span style={{fontSize:9,fontWeight:700,padding:'3px 8px',borderRadius:5,background:f.cat==='General'?'rgba(96,165,250,0.12)':f.cat==='Payment'?'rgba(245,158,11,0.12)':'rgba(139,127,255,0.12)',color:f.cat==='General'?C.cyan:f.cat==='Payment'?'#F59E0B':C.purple,letterSpacing:'0.04em'}}>{f.cat.toUpperCase()}</span>
+                    </div>
+                    {isOpen && <div style={{fontSize:13,color:C.fg2,lineHeight:1.6,animation:'fadeIn 0.2s ease',marginTop:8}}>{f.a}</div>}
+                  </div>
+                  <div style={{transform:isOpen?'rotate(90deg)':'rotate(0deg)',transition:'transform 0.2s'}}>
+                    <Icon name="chevron-right" size={15} color={C.fg3}/>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Still need help */}
+        <div style={{background:'linear-gradient(135deg,rgba(49,92,255,0.10),rgba(139,127,255,0.06))',border:`1px solid rgba(49,92,255,0.22)`,borderRadius:14,padding:'18px 20px',display:'flex',alignItems:'center',gap:16}}>
+          <div style={{width:42,height:42,borderRadius:12,background:C.gradCTA,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:'0 4px 14px rgba(49,92,255,0.35)'}}>
+            <Icon name="mail" size={20} color="#fff"/>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:700,color:C.fg1,fontFamily:"'Space Grotesk'"}}>Still need help?</div>
+            <div style={{fontSize:12,color:C.fg2,marginTop:2}}>Our support team replies within 24 hours.</div>
+          </div>
+          <button onClick={()=>onNavigate('support')} style={{padding:'10px 18px',borderRadius:9,border:`1px solid ${C.borderStrong}`,background:'rgba(255,255,255,0.04)',color:C.fg1,fontSize:13,fontWeight:600,cursor:'pointer'}}>Contact Support</button>
+          <button style={{padding:'10px 18px',borderRadius:9,border:'none',background:C.gradCTA,color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',boxShadow:'0 3px 12px rgba(49,92,255,0.3)'}}>Bug Report</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── SUPPORT SCREEN ──────────────────────────────────── */
+const PAST_TICKETS = [
+  {id:1, subject:'Connection issue', agent:'Arda', date:'2026-05-03', status:'closed', preview:'Thanks for the logs — we\'ve patched the WireGuard handshake on Frankfurt. Let us know if you see it again.'},
+  {id:2, subject:'Slow speeds on Switzerland', agent:'Lina', date:'2026-05-01', status:'closed', preview:'Try the Zurich-2 endpoint — it should give you ~3× the throughput on that route.'},
+  {id:3, subject:'Billing question', agent:'Alex', date:'2026-04-28', status:'closed', preview:'Refund processed — should hit your card in 2–4 business days.'},
+  {id:4, subject:'Kill Switch not triggering', agent:'Deniz', date:'2026-04-20', status:'closed', preview:'Resolved in v3.0.7. Please update from the App Store and toggle Kill Switch off/on once.'},
+  {id:5, subject:'Subscription transfer', agent:'Alex', date:'2026-04-12', status:'closed', preview:'Plan transferred to your new email. New login: alex@example.com.'},
+];
+
+const SupportScreen = ({ onNavigate }) => {
+  const [showHistory, setShowHistory] = useState(false);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [category, setCategory] = useState('Technical');
+  const [openTicket, setOpenTicket] = useState(null);
+  const [sent, setSent] = useState(false);
+
+  const send = () => {
+    if(!subject.trim() || !body.trim()) return;
+    setSent(true);
+    setTimeout(()=>{ setSent(false); setSubject(''); setBody(''); },2200);
+  };
+
+  return (
+    <div style={{flex:1,display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+      <div style={{padding:'20px 28px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`,flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1}}>Support</div>
+          <div style={{fontSize:12,color:C.fg2,marginTop:2}}>{showHistory?'Your past conversations':'Open a new ticket — typical reply within 24 hours'}</div>
+        </div>
+        <button onClick={()=>{setShowHistory(v=>!v); setOpenTicket(null);}} style={{padding:'9px 16px',borderRadius:10,border:`1px solid ${showHistory?'rgba(49,92,255,0.35)':C.borderStrong}`,background:showHistory?'rgba(49,92,255,0.12)':'rgba(255,255,255,0.04)',color:showHistory?C.cyan:C.fg1,fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',gap:8,transition:'all 0.2s'}}>
+          <Icon name="activity" size={14} color="currentColor"/>
+          {showHistory?'Hide history':`Past chats (${PAST_TICKETS.length})`}
+        </button>
+      </div>
+
+      <div className="scroll-y" style={{flex:1,padding:'24px 28px'}}>
+        {!showHistory && (
+          <div style={{maxWidth:760,margin:'0 auto',animation:'fadeIn 0.25s ease'}}>
+            {/* Hero */}
+            <div style={{background:'linear-gradient(135deg,rgba(49,92,255,0.10),rgba(139,127,255,0.06))',border:`1px solid rgba(49,92,255,0.22)`,borderRadius:16,padding:'24px',marginBottom:20,position:'relative',overflow:'hidden'}}>
+              <div style={{position:'absolute',top:-60,right:-60,width:240,height:240,borderRadius:'50%',background:'radial-gradient(circle,rgba(96,165,250,0.16),transparent 70%)',pointerEvents:'none'}}/>
+              <div style={{display:'flex',alignItems:'center',gap:16,position:'relative',zIndex:1}}>
+                <div style={{width:54,height:54,borderRadius:14,background:C.gradCTA,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:'0 6px 20px rgba(49,92,255,0.4)'}}>
+                  <Icon name="mail" size={26} color="#fff"/>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1,marginBottom:4}}>How can we help?</div>
+                  <div style={{fontSize:13,color:C.fg2,lineHeight:1.5}}>Describe your issue below. The more detail you share, the faster we can resolve it.</div>
+                </div>
+              </div>
+            </div>
+
+            {/* New ticket form */}
+            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:16,padding:'22px'}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.fg3,letterSpacing:'0.07em',textTransform:'uppercase',marginBottom:6}}>Category</div>
+              <div style={{display:'flex',gap:8,marginBottom:18,flexWrap:'wrap'}}>
+                {['Technical','Billing','Account','Feedback'].map(c=>{
+                  const isActive = category===c;
+                  return (
+                    <div key={c} onClick={()=>setCategory(c)} style={{padding:'8px 16px',borderRadius:99,fontSize:12,fontWeight:isActive?600:500,cursor:'pointer',background:isActive?'rgba(49,92,255,0.15)':'rgba(255,255,255,0.04)',border:`1px solid ${isActive?'rgba(49,92,255,0.35)':C.border}`,color:isActive?C.cyan:C.fg2,transition:'all 0.15s'}}>{c}</div>
+                  );
+                })}
+              </div>
+
+              <div style={{fontSize:11,fontWeight:600,color:C.fg3,letterSpacing:'0.07em',textTransform:'uppercase',marginBottom:6}}>Subject</div>
+              <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Briefly describe your issue" style={{width:'100%',background:C.elevated,border:`1px solid ${C.border}`,borderRadius:11,padding:'13px 16px',fontFamily:"'DM Sans'",fontSize:14,color:C.fg1,marginBottom:16}}/>
+
+              <div style={{fontSize:11,fontWeight:600,color:C.fg3,letterSpacing:'0.07em',textTransform:'uppercase',marginBottom:6}}>Description</div>
+              <textarea value={body} onChange={e=>setBody(e.target.value)} placeholder="Steps to reproduce, error messages, what you expected to happen…" style={{width:'100%',background:C.elevated,border:`1px solid ${C.border}`,borderRadius:11,padding:'13px 16px',fontFamily:"'DM Sans'",fontSize:14,color:C.fg1,minHeight:160,resize:'vertical',outline:'none'}}/>
+
+              <div style={{display:'flex',alignItems:'center',gap:14,marginTop:18}}>
+                <div style={{display:'flex',alignItems:'center',gap:8,padding:'7px 13px',borderRadius:8,background:'rgba(0,229,160,0.08)',border:'1px solid rgba(0,229,160,0.2)'}}>
+                  <div style={{width:6,height:6,borderRadius:'50%',background:C.success,boxShadow:`0 0 6px ${C.success}`}}/>
+                  <span style={{fontSize:11,color:C.success,fontWeight:600}}>Diagnostics attached</span>
+                </div>
+                <div style={{flex:1,fontSize:11,color:C.fg3}}>App version, OS, and last connection log.</div>
+                <button onClick={send} style={{padding:'12px 28px',borderRadius:10,border:'none',background:sent?C.success:C.gradCTA,color:'#fff',fontSize:14,fontWeight:600,cursor:'pointer',boxShadow:'0 4px 14px rgba(49,92,255,0.35)',display:'flex',alignItems:'center',gap:8,transition:'background 0.3s'}}>
+                  {sent && <Icon name="check" size={14} color="#fff" sw={2.5}/>}
+                  {sent?'Sent':'Send Ticket'}
+                </button>
+              </div>
+            </div>
+
+            {/* Quick contacts */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:18}}>
+              {[
+                {icon:'mail',label:'Email',val:'support@colitu.com'},
+                {icon:'phone',label:'Live chat',val:'Available 9–18 UTC'},
+                {icon:'help',label:'Knowledge base',val:'400+ articles'},
+              ].map(item=>(
+                <div key={item.label} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:'14px',display:'flex',alignItems:'center',gap:12,cursor:'pointer'}}>
+                  <div style={{width:34,height:34,borderRadius:9,background:C.elevated,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <Icon name={item.icon} size={15} color={C.cyan}/>
+                  </div>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:C.fg1}}>{item.label}</div>
+                    <div style={{fontSize:11,color:C.fg2,marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.val}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* History view */}
+        {showHistory && !openTicket && (
+          <div style={{maxWidth:760,margin:'0 auto',animation:'fadeIn 0.25s ease'}}>
+            <div style={{display:'flex',flexDirection:'column',gap:10}}>
+              {PAST_TICKETS.map(t=>(
+                <div key={t.id} onClick={()=>setOpenTicket(t)} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:'15px 18px',cursor:'pointer',display:'flex',alignItems:'center',gap:14,transition:'border-color 0.15s'}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor='rgba(49,92,255,0.3)'}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+                  <div style={{width:38,height:38,borderRadius:10,background:C.elevated,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <Icon name="mail" size={16} color={C.fg2}/>
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+                      <div style={{fontSize:14,fontWeight:600,color:C.fg1,fontFamily:"'Space Grotesk'"}}>{t.subject}</div>
+                      <span style={{fontSize:9,fontWeight:700,padding:'3px 8px',borderRadius:5,background:'rgba(0,229,160,0.1)',color:C.success,letterSpacing:'0.06em',border:'1px solid rgba(0,229,160,0.25)'}}>CLOSED</span>
+                    </div>
+                    <div style={{fontSize:12,color:C.fg2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:3}}>{t.preview}</div>
+                    <div style={{fontSize:11,color:C.fg3}}>Agent: {t.agent} · {t.date}</div>
+                  </div>
+                  <Icon name="chevron-right" size={15} color={C.fg3}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Ticket detail */}
+        {showHistory && openTicket && (
+          <div style={{maxWidth:760,margin:'0 auto',animation:'fadeIn 0.25s ease'}}>
+            <div onClick={()=>setOpenTicket(null)} style={{display:'inline-flex',alignItems:'center',gap:6,padding:'7px 12px',borderRadius:9,background:'rgba(255,255,255,0.04)',border:`1px solid ${C.border}`,fontSize:12,color:C.fg2,cursor:'pointer',marginBottom:16}}>
+              <span style={{transform:'rotate(180deg)',display:'inline-flex'}}><Icon name="chevron-right" size={13} color={C.fg2}/></span>
+              Back to history
+            </div>
+            <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:'22px',marginBottom:14}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:6}}>
+                <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1}}>{openTicket.subject}</div>
+                <span style={{fontSize:9,fontWeight:700,padding:'3px 8px',borderRadius:5,background:'rgba(0,229,160,0.1)',color:C.success,letterSpacing:'0.06em',border:'1px solid rgba(0,229,160,0.25)'}}>CLOSED</span>
+              </div>
+              <div style={{fontSize:12,color:C.fg3,marginBottom:18}}>Opened {openTicket.date} · Resolved by {openTicket.agent}</div>
+
+              {/* Message thread */}
+              <div style={{display:'flex',flexDirection:'column',gap:14}}>
+                <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+                  <div style={{width:32,height:32,borderRadius:8,background:'rgba(255,255,255,0.06)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <Icon name="user" size={14} color={C.fg2}/>
+                  </div>
+                  <div style={{flex:1,background:C.elevated,borderRadius:11,padding:'12px 14px'}}>
+                    <div style={{fontSize:11,color:C.fg3,marginBottom:4}}>You · {openTicket.date}</div>
+                    <div style={{fontSize:13,color:C.fg1,lineHeight:1.6}}>Hi, I'm running into an issue with my connection. Could you take a look?</div>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
+                  <div style={{width:32,height:32,borderRadius:8,background:C.gradCTA,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <span style={{fontSize:13,fontWeight:700,color:'#fff'}}>{openTicket.agent[0]}</span>
+                  </div>
+                  <div style={{flex:1,background:'rgba(49,92,255,0.06)',border:'1px solid rgba(49,92,255,0.18)',borderRadius:11,padding:'12px 14px'}}>
+                    <div style={{fontSize:11,color:C.cyan,marginBottom:4,fontWeight:600}}>{openTicket.agent} · Colitu Support</div>
+                    <div style={{fontSize:13,color:C.fg1,lineHeight:1.6}}>{openTicket.preview}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/* ─── NOTIFICATIONS SCREEN ────────────────────────────── */
+const NotificationsScreen = () => {
+  const items = [
+    {icon:'check-circle',color:C.success,title:'Connected to Tokyo',sub:'Your connection is encrypted',time:'2m ago'},
+    {icon:'star',color:'#F59E0B',title:'Pro plan renewed',sub:'Next renewal: March 21, 2027',time:'1h ago'},
+    {icon:'shield',color:C.cyan,title:'New protocol available',sub:'WireGuard 2.0 is now live on all servers',time:'3h ago'},
+    {icon:'info',color:C.fg2,title:'Maintenance window',sub:'EU servers will restart May 12, 02:00 UTC',time:'1d ago'},
+    {icon:'download',color:C.success,title:'Update installed',sub:'You\'re now on Colitu v3.1.0',time:'2d ago'},
+  ];
+  return (
+    <div style={{flex:1,display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+      <div style={{padding:'20px 28px 14px',borderBottom:`1px solid rgba(255,255,255,0.05)`,flexShrink:0,display:'flex',alignItems:'center',gap:12}}>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"'Space Grotesk'",fontSize:18,fontWeight:700,color:C.fg1}}>Notifications</div>
+          <div style={{fontSize:12,color:C.fg2,marginTop:2}}>{items.length} recent updates</div>
+        </div>
+        <button style={{padding:'9px 16px',borderRadius:10,border:`1px solid ${C.borderStrong}`,background:'rgba(255,255,255,0.04)',color:C.fg1,fontSize:13,fontWeight:500,cursor:'pointer'}}>Mark all read</button>
+      </div>
+      <div className="scroll-y" style={{flex:1,padding:'22px 28px'}}>
+        <div style={{maxWidth:760,margin:'0 auto',display:'flex',flexDirection:'column',gap:8}}>
+          {items.map((n,i)=>(
+            <div key={i} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+              <div style={{width:38,height:38,borderRadius:10,background:`${n.color}14`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <Icon name={n.icon} size={16} color={n.color}/>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:600,color:C.fg1}}>{n.title}</div>
+                <div style={{fontSize:12,color:C.fg2,marginTop:2}}>{n.sub}</div>
+              </div>
+              <div style={{fontSize:11,color:C.fg3,flexShrink:0}}>{n.time}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── APP SHELL ───────────────────────────────────────── */
+const App = () => {
+  const [screen, setScreen] = useState('home');
+  const [isPro, setIsPro] = useState(true);
+  const [userExpanded, setUserExpanded] = useState(false);
+  const [appState, setAppState] = useState({ connected:false, connecting:false, selectedServer:null });
+
+  const screens = {
+    home:          <HomeScreen          appState={appState} setAppState={setAppState} onNavigate={setScreen} isPro={isPro}/>,
+    locations:     <LocationsScreen     appState={appState} setAppState={setAppState} onNavigate={setScreen} isPro={isPro}/>,
+    account:       <AccountScreen       onNavigate={setScreen} isPro={isPro}/>,
+    help:          <HelpScreen          onNavigate={setScreen}/>,
+    support:       <SupportScreen       onNavigate={setScreen}/>,
+    notifications: <NotificationsScreen/>,
+    settings:      <SettingsScreen      onNavigate={setScreen} isPro={isPro}/>,
+  };
+
+  return (
+    <div style={{width:960,height:600,background:C.base,borderRadius:10,border:`1px solid rgba(255,255,255,0.07)`,boxShadow:`0 32px 80px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04)`,overflow:'hidden',display:'flex',flexDirection:'column'}}>
+      <TitleBar/>
+      {/* Dev toggle for Free/Pro — top right corner */}
+      <div style={{position:'absolute',top:6,right:160,zIndex:999,display:'flex',alignItems:'center',gap:6}}>
+        <span style={{fontSize:10,color:C.fg3}}>Free</span>
+        <div onClick={()=>setIsPro(p=>!p)} style={{width:32,height:18,borderRadius:9,cursor:'pointer',background:isPro?C.gradCTA:'rgba(255,255,255,0.1)',position:'relative',transition:'background 0.2s'}}>
+          <div style={{position:'absolute',top:2,left:isPro?14:2,width:14,height:14,borderRadius:'50%',background:'#fff',transition:'left 0.2s'}}/>
+        </div>
+        <span style={{fontSize:10,color:C.fg3}}>Pro</span>
+      </div>
+      <div style={{flex:1,display:'flex',overflow:'hidden'}}>
+        <Sidebar active={screen} onNavigate={setScreen} isPro={isPro} userExpanded={userExpanded} setUserExpanded={setUserExpanded}/>
+        <div style={{flex:1,display:'flex',overflow:'hidden',background:C.base}}>
+          {screens[screen]}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

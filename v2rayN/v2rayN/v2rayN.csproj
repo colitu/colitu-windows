@@ -1,0 +1,89 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+		<GenerateSatelliteAssembliesForCore>true</GenerateSatelliteAssembliesForCore>
+		<UseWPF>true</UseWPF>
+		<ApplicationIcon>Resources\colitu.ico</ApplicationIcon>
+		<AssemblyName>ColituVPN</AssemblyName>
+		<ApplicationManifest>app.manifest</ApplicationManifest>
+		<SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+
+
+	<ItemGroup>
+		<PackageReference Include="MaterialDesignThemes" />
+		<PackageReference Include="H.NotifyIcon.Wpf" />
+		<PackageReference Include="ReactiveUI.Fody">
+			<TreatAsUsed>true</TreatAsUsed>
+		</PackageReference>
+		<PackageReference Include="ReactiveUI.WPF" />
+		<PackageReference Include="SharpVectors.Wpf" />
+		<PackageReference Include="System.Security.Cryptography.ProtectedData" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<AdditionalFiles Include="app.manifest" />
+		<EmbeddedResource Include="Resources\colitu.ico">
+			<CopyToOutputDirectory>Never</CopyToOutputDirectory>
+		</EmbeddedResource>
+		<Resource Include="Resources\NotifyIcon1.ico" />
+		<Resource Include="Resources\NotifyIcon2.ico" />
+		<Resource Include="Resources\NotifyIcon3.ico" />
+		<Resource Include="Resources\NotifyIcon4.ico" />
+		<Resource Include="Resources\colitu.ico" />
+		<Resource Include="Resources\colitu-icon.png" />
+		<Resource Include="Resources\mark.png" />
+		<Resource Include="Resources\grain.png" />
+		<Resource Include="Resources\banner.jpg" />
+		<Resource Include="Resources\Fonts\*.ttf" />
+		<Resource Include="flags\**\*.svg" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ServiceLib\ServiceLib.csproj" />
+	</ItemGroup>
+
+	<!-- Build çıktısına doğrudan bin\xray\ olarak kopyala -->
+	<Target Name="CopyXrayFiles" AfterTargets="Build">
+		<ItemGroup>
+			<_XrayFiles Include="$(MSBuildThisFileDirectory)..\..\xray-dosyalari\**\*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_XrayFiles)" DestinationFolder="$(OutDir)bin\xray\%(RecursiveDir)" SkipUnchangedFiles="true" />
+	</Target>
+
+	<Target Name="CopySingboxFiles" AfterTargets="Build">
+		<ItemGroup>
+			<_SingboxFiles Include="$(MSBuildThisFileDirectory)..\..\singbox-dosyalari\**\*" Exclude="$(MSBuildThisFileDirectory)..\..\singbox-dosyalari\README.md" />
+			<_SingboxFiles Include="$(MSBuildThisFileDirectory)..\..\xray-dosyalari\wintun.dll" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_SingboxFiles)" DestinationFolder="$(OutDir)bin\sing_box\" SkipUnchangedFiles="true" />
+	</Target>
+
+	<Target Name="CopySingboxFilesToPublish" AfterTargets="Publish">
+		<ItemGroup>
+			<_SingboxPublishFiles Include="$(MSBuildThisFileDirectory)..\..\singbox-dosyalari\**\*" Exclude="$(MSBuildThisFileDirectory)..\..\singbox-dosyalari\README.md" />
+			<_SingboxPublishFiles Include="$(MSBuildThisFileDirectory)..\..\xray-dosyalari\wintun.dll" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_SingboxPublishFiles)" DestinationFolder="$(PublishDir)bin\sing_box\" SkipUnchangedFiles="true" />
+	</Target>
+
+	<!-- Publish çıktısına bin\xray\ olarak kopyala -->
+	<Target Name="CopyXrayFilesToPublish" AfterTargets="Publish">
+		<ItemGroup>
+			<_XrayPublishFiles Include="$(MSBuildThisFileDirectory)..\..\xray-dosyalari\**\*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_XrayPublishFiles)" DestinationFolder="$(PublishDir)bin\xray\%(RecursiveDir)" SkipUnchangedFiles="true" />
+	</Target>
+
+	<!-- Setup fallback: xray-dosyalari klasörünü exe yanına da koyar (SetupWindow bunu bulur) -->
+	<Target Name="CopyXraySetupFolder" AfterTargets="Publish">
+		<ItemGroup>
+			<_XraySetupFiles Include="$(MSBuildThisFileDirectory)..\..\xray-dosyalari\**\*" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_XraySetupFiles)" DestinationFolder="$(PublishDir)xray-dosyalari\%(RecursiveDir)" SkipUnchangedFiles="true" />
+	</Target>
+
+</Project>

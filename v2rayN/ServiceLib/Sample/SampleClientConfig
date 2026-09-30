@@ -1,0 +1,30 @@
+{
+	"log": {
+		"access": "Vaccess.log",
+		"error": "Verror.log",
+		"loglevel": "warning"
+	},
+	"inbounds": [],
+	"outbounds": [
+		{
+			"protocol": "freedom",
+			"tag": "direct"
+		},
+		{
+			"protocol": "blackhole",
+			"tag": "block"
+		}
+	],
+	"routing": {
+		"domainStrategy": "IPIfNonMatch",
+		"rules": [
+			{
+				"inboundTag": [
+					"api"
+				],
+				"outboundTag": "api",
+				"type": "field"
+			}
+		]
+	}
+}
