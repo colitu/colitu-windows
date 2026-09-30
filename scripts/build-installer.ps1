@@ -1,11 +1,18 @@
 param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
-    [string]$Version = "2.4.0",
-    [switch]$SkipPublish
+    [string]$Version = "2.4.1",
+    [switch]$SkipPublish,
+    # ECDSA P-256 private key (PKCS#8 PEM) that signs latest.json. Keep it off the repository;
+    # the app only installs updates whose manifest verifies against the embedded public key.
+    [string]$SigningKeyPath = $(if ($env:COLITU_UPDATE_SIGNING_KEY) { $env:COLITU_UPDATE_SIGNING_KEY } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-windows--update-signing-private.pem" })
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw "Run this script with PowerShell 7 (pwsh): signing the update manifest needs .NET's PEM support."
+}
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $projectPath = Join-Path $repoRoot "v2rayN\v2rayN\v2rayN.csproj"
@@ -52,7 +59,13 @@ Assert-FileExists (Join-Path $xraySourceDir "wintun.dll") "wintun.dll"
 Assert-FileExists (Join-Path $xraySourceDir "geoip.dat") "geoip.dat"
 Assert-FileExists (Join-Path $xraySourceDir "geosite.dat") "geosite.dat"
 Assert-FileExists (Join-Path $singboxSourceDir "sing-box.exe") "sing-box.exe"
+Assert-FileExists $SigningKeyPath "Update manifest signing key"
 
+# Start from an empty folder: running the published app for a test leaves its database,
+# logs and session there, and the installer would ship them to every user.
+if (-not $SkipPublish -and (Test-Path $publishDir)) {
+    Remove-Item -LiteralPath $publishDir -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $publishDir | Out-Null
 New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 
@@ -113,13 +126,36 @@ $hash = Get-FileHash $installerPath -Algorithm SHA256
 # Upload the installer and this file together to the website's downloads/windows/ folder.
 $versionParts = $Version.Split('.') | ForEach-Object { [int]$_ }
 $versionCode = ($versionParts[0] * 100) + ($versionParts[1] * 10) + $versionParts[2]
+$downloadUrl = "https://colitu.com/downloads/windows/ColituVPN-Setup-$Version-x64.exe"
+$sha256 = $hash.Hash.ToLowerInvariant()
+$forceUpdate = $false
+
+# Same text as ColituUpdateSignature.Message in the app; any change there must be mirrored here.
+$signedText = @(
+    "colitu-windows-update-v1",
+    $versionCode.ToString([System.Globalization.CultureInfo]::InvariantCulture),
+    $Version,
+    $downloadUrl,
+    $sha256,
+    $(if ($forceUpdate) { "true" } else { "false" })
+) -join "`n"
+$signingKey = [System.Security.Cryptography.ECDsa]::Create()
+try {
+    $signingKey.ImportFromPem((Get-Content -LiteralPath $SigningKeyPath -Raw))
+    $signature = [Convert]::ToBase64String($signingKey.SignData([System.Text.Encoding]::UTF8.GetBytes($signedText), [System.Security.Cryptography.HashAlgorithmName]::SHA256))
+}
+finally {
+    $signingKey.Dispose()
+}
+
 $manifest = [ordered]@{
     latestVersionCode = $versionCode
     versionName = $Version
-    downloadUrl = "https://colitu.com/downloads/windows/ColituVPN-Setup-$Version-x64.exe"
-    sha256 = $hash.Hash.ToLowerInvariant()
-    forceUpdate = $false
+    downloadUrl = $downloadUrl
+    sha256 = $sha256
+    forceUpdate = $forceUpdate
     releaseNotes = ""
+    signature = $signature
 }
 $stableInstallerPath = Join-Path $installerDir "ColituVPN-Setup-x64.exe"
 Copy-Item -Path $installerPath -Destination $stableInstallerPath -Force

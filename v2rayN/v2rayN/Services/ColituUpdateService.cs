@@ -2,7 +2,6 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net;
 using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Text;
 
@@ -14,13 +13,21 @@ public sealed class ColituUpdateService
 
     private static readonly int LocalVersionCode = ColituAuthService.VersionCode(ColituAuthService.ClientVersion);
 
+    /// <summary>Folder under the install directory that holds a downloaded update (administrators only).</summary>
+    public const string UpdateFolderName = "guiUpdates";
+
     /// <summary>
     /// Release manifest published next to the installer on the Colitu website
-    /// (see docs/release.md). Overridable for staging with COLITU_UPDATE_MANIFEST_URL.
+    /// (see docs/release.md). Debug builds can point it at a staging manifest
+    /// with COLITU_UPDATE_MANIFEST_URL; release builds ignore the variable, since
+    /// anything that can set a user environment variable could otherwise feed
+    /// this elevated app an installer to run.
     /// </summary>
     private static string ManifestUrl =>
-        Environment.GetEnvironmentVariable("COLITU_UPDATE_MANIFEST_URL")?.Trim().NullIfEmpty()
-        ?? $"{ColituAuthService.WebBaseUrl}/downloads/windows/latest.json";
+#if DEBUG
+        Environment.GetEnvironmentVariable("COLITU_UPDATE_MANIFEST_URL")?.Trim().NullIfEmpty() ??
+#endif
+        $"{ColituAuthService.WebBaseUrl}/downloads/windows/latest.json";
     private static readonly string LocalVersionName = ColituAuthService.ClientVersion;
     private static readonly TimeSpan AttemptCooldown = TimeSpan.FromMinutes(30);
 
@@ -47,6 +54,11 @@ public sealed class ColituUpdateService
             if (!response.IsSuccessStatusCode) return null;
             var payload = await response.Content.ReadFromJsonAsync<ColituVersionPayload>(_jsonOptions);
             if (payload == null) return null;
+            if (!ColituUpdateSignature.Verify(payload))
+            {
+                Logging.SaveLog("ColituUpdateService: release manifest signature is missing or invalid; update ignored");
+                return null;
+            }
 
             var remoteCode = payload.LatestVersionCode;
             var remoteName = payload.VersionName ?? remoteCode.ToString();
@@ -61,7 +73,7 @@ public sealed class ColituUpdateService
                 VersionCode = remoteCode,
                 CurrentVersion = LocalVersionName,
                 NewVersion = remoteName,
-                DownloadUrl = payload.DownloadUrl ?? $"{ColituAuthService.WebBaseUrl}/downloads/windows/ColituVPN-Setup-x64.exe",
+                DownloadUrl = payload.DownloadUrl!,
                 Sha256 = payload.Sha256,
                 Force = payload.ForceUpdate,
                 Notes = payload.ReleaseNotes ?? ""
@@ -97,15 +109,15 @@ public sealed class ColituUpdateService
 
     private async Task DownloadUpdateOnceAsync(ColituUpdateInfo info, IProgress<ColituDownloadProgress>? progress, CancellationToken cancellationToken)
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), "colitu-update");
-        Directory.CreateDirectory(tempDir);
-        var destPath = Path.Combine(tempDir, $"ColituVPN-new-{info.VersionCode}.exe");
         ValidateDownloadUrl(info.DownloadUrl);
-
-        if (File.Exists(destPath))
+        if (string.IsNullOrWhiteSpace(info.Sha256))
         {
-            try { File.Delete(destPath); } catch { }
+            throw new InvalidOperationException("The release manifest does not carry a SHA256 for the update.");
         }
+        // The installer and its helper script run elevated, so they are kept in a
+        // fresh folder that only administrators can write, never in %TEMP%.
+        var updateDir = ColituHardening.CreateProtectedDirectory(Path.Combine(Utils.StartupPath(), UpdateFolderName));
+        var destPath = Path.Combine(updateDir, $"ColituVPN-new-{info.VersionCode}.exe");
 
         using var response = await _downloadClient.GetAsync(info.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -133,8 +145,7 @@ public sealed class ColituUpdateService
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(info.Sha256)) VerifySha256(destPath, info.Sha256);
-        else VerifyAuthenticodeSignature(destPath);
+        VerifySha256(destPath, info.Sha256);
         ValidateDownloadedVersion(destPath, info.NewVersion);
 
         info.LocalPath = destPath;
@@ -233,6 +244,17 @@ public sealed class ColituUpdateService
             }
             Stop-AppProcesses
             Start-Sleep -Milliseconds 500
+
+            if ($ExpectedSha256) {
+              $actualSource = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash
+              if ($actualSource -ne $ExpectedSha256.Trim().ToUpperInvariant()) {
+                Write-UpdateLog "Downloaded package SHA256 mismatch before start. expected=$ExpectedSha256 actual=$actualSource"
+                Remove-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
+                Start-App (Resolve-InstalledApp) | Out-Null
+                Show-UpdateError "Colitu VPN update was rejected because the downloaded file changed."
+                exit 1
+              }
+            }
 
             if ($PackageKind -eq "installer") {
               $installed = $false
@@ -409,61 +431,31 @@ public sealed class ColituUpdateService
         }
     }
 
-    private static void VerifyAuthenticodeSignature(string filePath)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            File.Delete(filePath);
-            throw new InvalidOperationException("Update SHA256 is required when Authenticode signature validation is unavailable.");
-        }
-
-        try
-        {
-            using var certificate = new X509Certificate2(X509Certificate.CreateFromSignedFile(filePath));
-            if (certificate.NotAfter <= DateTime.Now)
-            {
-                File.Delete(filePath);
-                throw new InvalidOperationException("Downloaded update signature is expired.");
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            throw;
-        }
-        catch
-        {
-            File.Delete(filePath);
-            throw new InvalidOperationException("Downloaded update is not signed. The release manifest must provide SHA256 for unsigned packages.");
-        }
-    }
-
     private static void ValidateDownloadUrl(string downloadUrl)
     {
         if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri))
         {
             throw new InvalidOperationException("Update download URL is invalid.");
         }
-        if (uri.Scheme != Uri.UriSchemeHttps && !IPAddressIsLoopback(uri.Host))
+#if DEBUG
+        // Local mock servers during development.
+        if (IPAddressIsLoopback(uri.Host))
+        {
+            return;
+        }
+#endif
+        if (uri.Scheme != Uri.UriSchemeHttps)
         {
             throw new InvalidOperationException("Update download URL must use HTTPS.");
         }
-
-        var apiHost = Uri.TryCreate(ColituAuthService.Instance.ApiBaseUrl, UriKind.Absolute, out var apiUri)
-            ? apiUri.Host
-            : "";
-        var allowed = new[]
-        {
-            apiHost,
-            "colitu.com",
-            "www.colitu.com",
-            "api.colitu.com"
-        }.Where(host => !string.IsNullOrWhiteSpace(host));
-
-        if (!IPAddressIsLoopback(uri.Host) && !allowed.Any(host => string.Equals(host, uri.Host, StringComparison.OrdinalIgnoreCase)))
+        if (!TrustedDownloadHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Update download host is not trusted.");
         }
     }
+
+    // Fixed list: the API address can be configured, so it must not widen where installers come from.
+    private static readonly string[] TrustedDownloadHosts = ["colitu.com", "www.colitu.com", "api.colitu.com"];
 
     private static bool IPAddressIsLoopback(string host)
     {
@@ -587,6 +579,53 @@ internal sealed class ColituVersionPayload
     public string? Sha256 { get; set; }
     public bool ForceUpdate { get; set; }
     public string? ReleaseNotes { get; set; }
+    /// <summary>Base64 ECDSA P-256 signature over <see cref="ColituUpdateSignature.Message"/>.</summary>
+    public string? Signature { get; set; }
+}
+
+/// <summary>
+/// The release manifest is signed offline (scripts/build-installer.ps1) with a
+/// key that never leaves the release machine. The app runs every update
+/// elevated, so HTTPS alone is not enough: a compromised website must not be
+/// able to hand every client an installer.
+/// </summary>
+internal static class ColituUpdateSignature
+{
+    private const string PublicKeyPem = """
+        -----BEGIN PUBLIC KEY-----
+        MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb7h8TtW4ekewQccnpdJo2i0fsJ28
+        9gl8IkgEiNIAJvkcXryv7AZUf9O4qZboDzW7Jg2rYpnGJrVkxa1HDRmk8Q==
+        -----END PUBLIC KEY-----
+        """;
+
+    /// <summary>The exact text the release script signs; changing any field breaks the signature.</summary>
+    internal static string Message(ColituVersionPayload payload) => string.Join("\n",
+        "colitu-windows-update-v1",
+        payload.LatestVersionCode.ToString(CultureInfo.InvariantCulture),
+        payload.VersionName ?? "",
+        payload.DownloadUrl ?? "",
+        (payload.Sha256 ?? "").Trim().ToLowerInvariant(),
+        payload.ForceUpdate ? "true" : "false");
+
+    internal static bool Verify(ColituVersionPayload payload, string publicKeyPem = PublicKeyPem)
+    {
+        if (string.IsNullOrWhiteSpace(payload.Signature)
+            || string.IsNullOrWhiteSpace(payload.Sha256)
+            || string.IsNullOrWhiteSpace(payload.DownloadUrl))
+        {
+            return false;
+        }
+        try
+        {
+            using var key = ECDsa.Create();
+            key.ImportFromPem(publicKeyPem);
+            return key.VerifyData(Encoding.UTF8.GetBytes(Message(payload)), Convert.FromBase64String(payload.Signature.Trim()), HashAlgorithmName.SHA256);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }
 
 public sealed class ColituUpdateState

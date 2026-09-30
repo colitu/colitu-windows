@@ -678,11 +678,20 @@ public sealed class ColituAuthService
     {
         try
         {
-            if (!File.Exists(SessionPath())) return;
-            _session = JsonSerializer.Deserialize<ColituSession>(File.ReadAllText(SessionPath()), _jsonOptions) ?? new();
+            // Versions before 2.4.1 kept one session file for every Windows user; adopt
+            // it only when it decrypts for this user (DPAPI throws otherwise).
+            var legacy = !File.Exists(SessionPath()) && File.Exists(LegacySessionPath());
+            var source = legacy ? LegacySessionPath() : SessionPath();
+            if (!File.Exists(source)) return;
+            _session = JsonSerializer.Deserialize<ColituSession>(File.ReadAllText(source), _jsonOptions) ?? new();
             _accessToken = Unprotect(_session.AccessToken);
             _refreshToken = Unprotect(_session.RefreshToken);
             _accessTokenExpiresAt = ParseJwtExpiry(_accessToken);
+            if (legacy)
+            {
+                PersistSession();
+                try { File.Delete(LegacySessionPath()); } catch { }
+            }
         }
         catch (Exception ex)
         {
@@ -714,9 +723,14 @@ public sealed class ColituAuthService
 
     private static string ResolveApiBaseUrl()
     {
+#if DEBUG
+        // Release builds ignore the variable: a user-level variable would send the
+        // password and tokens of this elevated app to any server.
         var env = Environment.GetEnvironmentVariable("COLITU_API_BASE_URL");
         if (!string.IsNullOrWhiteSpace(env)) return env.Trim().TrimEnd('/');
+#endif
 
+        // guiConfigs is writable by administrators only.
         var configPath = Utils.GetConfigPath("colitu-api.json");
         if (File.Exists(configPath))
         {
@@ -726,7 +740,7 @@ public sealed class ColituAuthService
                 if (doc.RootElement.TryGetProperty("apiBaseUrl", out var value))
                 {
                     var configured = value.GetString();
-                    if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim().TrimEnd('/');
+                    if (IsAllowedApiBaseUrl(configured)) return configured!.Trim().TrimEnd('/');
                 }
             }
             catch
@@ -736,6 +750,19 @@ public sealed class ColituAuthService
         }
 
         return DefaultApiBaseUrl;
+    }
+
+    /// <summary>Passwords and tokens never travel in clear text: only https (or a local mock in debug builds).</summary>
+    internal static bool IsAllowedApiBaseUrl(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+#if DEBUG
+        if (uri.IsLoopback) return true;
+#endif
+        return uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo);
     }
 
     private static string BuildStableDeviceId()
@@ -920,7 +947,9 @@ public sealed class ColituAuthService
         }
     }
 
-    private static string SessionPath() => Utils.GetConfigPath("colitu-auth-session.json");
+    private static string SessionPath() => ColituHardening.UserConfigPath("colitu-auth-session.json");
+
+    private static string LegacySessionPath() => Utils.GetConfigPath("colitu-auth-session.json");
 
     private static string ReadClientVersion()
     {

@@ -29,6 +29,7 @@ public class StatisticsSingboxService
             if (webSocket == null)
             {
                 webSocket = new ClientWebSocket();
+                webSocket.Options.SetRequestHeader("Authorization", $"Bearer {AppManager.Instance.ClashApiSecret}");
                 await webSocket.ConnectAsync(new Uri(Url), CancellationToken.None);
             }
         }

@@ -11,6 +11,9 @@ public sealed class AppManager
     public static AppManager Instance => _instance.Value;
     public Config Config => _config;
 
+    /// <summary>Per-run secret for the core's local control API, so other programs on the PC cannot use it.</summary>
+    public string ClashApiSecret { get; } = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+
     public int StatePort
     {
         get

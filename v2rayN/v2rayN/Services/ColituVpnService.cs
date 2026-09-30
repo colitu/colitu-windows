@@ -37,6 +37,9 @@ public sealed class ColituVpnService
     /// <summary>Transports that stalled under load recently, kept last until this time.</summary>
     private readonly Dictionary<string, DateTimeOffset> _stalledTransports = new(StringComparer.OrdinalIgnoreCase);
     private string? _activeTransport;
+    /// <summary>Names and addresses of the current VPN server; the only hosts kept readable in core log lines.</summary>
+    private readonly HashSet<string> _serverHosts = new(StringComparer.OrdinalIgnoreCase);
+    private int _watchdogBusy;
 
     /// <summary>The transport the current tunnel runs on (hysteria2, vless-reality, …); for support diagnostics.</summary>
     public string? ConnectedProtocol => Status == ColituVpnStatus.Connected ? _activeTransport : null;
@@ -44,6 +47,7 @@ public sealed class ColituVpnService
     private ColituVpnService()
     {
         LoadState();
+        DeleteLegacyConfigCache();
         StartWatchdog();
     }
 
@@ -173,7 +177,7 @@ public sealed class ColituVpnService
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             LogConnection("Connection attempt cancelled");
-            await CoreManager.Instance.CoreStop();
+            await StopCoreAsync();
             await SysProxyHandler.UpdateSysProxy(_config, true);
             await RestoreProxyPreferenceAsync();
             await RestoreRoutingPreferenceAsync();
@@ -185,7 +189,7 @@ public sealed class ColituVpnService
         {
             LastError = FriendlyConnectionError(ex);
             LogConnection($"Connection failed: {ex}");
-            await CoreManager.Instance.CoreStop();
+            await StopCoreAsync();
             await SysProxyHandler.UpdateSysProxy(_config, true);
             await RestoreProxyPreferenceAsync();
             await RestoreRoutingPreferenceAsync();
@@ -241,7 +245,7 @@ public sealed class ColituVpnService
     private async Task DisconnectCoreAsync()
     {
         await EnsureCoreReadyAsync();
-        await CoreManager.Instance.CoreStop();
+        await StopCoreAsync();
         var proxyResult = await SysProxyHandler.UpdateSysProxy(_config, true);
         LogConnection($"Disconnect proxy restore result={proxyResult}");
         await RestoreProxyPreferenceAsync();
@@ -261,7 +265,7 @@ public sealed class ColituVpnService
         {
             SetSelection(server);
             SetStatus(ColituVpnStatus.Reconnecting);
-            await CoreManager.Instance.CoreStop();
+            await StopCoreAsync();
             await ConnectCoreAsync(server);
         }
         finally
@@ -277,7 +281,7 @@ public sealed class ColituVpnService
         try
         {
             SetStatus(ColituVpnStatus.Reconnecting);
-            await CoreManager.Instance.CoreStop();
+            await StopCoreAsync();
             await ConnectCoreAsync(IsAutoSelection ? null : SelectedServer ?? FindServer(_session.SelectedServerId));
         }
         finally
@@ -419,6 +423,30 @@ public sealed class ColituVpnService
         }
     }
 
+    /// <summary>
+    /// Windows is signing out or shutting down: stop the core and hand the system
+    /// proxy back, otherwise the next boot starts with Windows pointing at a dead
+    /// local proxy until Colitu runs again. Blocks for at most a few seconds.
+    /// </summary>
+    public void CleanupForSessionEnd()
+    {
+        try
+        {
+            Task.Run(async () =>
+            {
+                await StopCoreAsync();
+                await SysProxyHandler.UpdateSysProxy(_config, true);
+                await RestoreProxyPreferenceAsync();
+            }).Wait(TimeSpan.FromSeconds(5));
+            ReleaseKillSwitch("Windows session ending");
+            LogConnection("Session ending: core stopped and system proxy restored");
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituVpnService.CleanupForSessionEnd", ex);
+        }
+    }
+
     /// <summary>Stops the tunnel on sign-out and forgets cached connection settings.</summary>
     public async Task ForgetAccountAsync()
     {
@@ -453,6 +481,28 @@ public sealed class ColituVpnService
     }
 
     private async Task WatchdogTickAsync()
+    {
+        // The timer fires every 2 s while a probe can take up to 14 s: one tick at a time,
+        // or two overlapping ticks would both start an automatic reconnect.
+        if (Interlocked.Exchange(ref _watchdogBusy, 1) == 1)
+        {
+            return;
+        }
+        try
+        {
+            await WatchdogCheckAsync();
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituVpnService.Watchdog", ex);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _watchdogBusy, 0);
+        }
+    }
+
+    private async Task WatchdogCheckAsync()
     {
         if (Status != ColituVpnStatus.Connected || _connectionLock.CurrentCount == 0 || _autoReconnecting)
         {
@@ -680,7 +730,21 @@ public sealed class ColituVpnService
         }
     }
 
-    private static string ConfigCachePath() => Utils.GetConfigPath("colitu-config-cache.bin");
+    private static string ConfigCachePath() => ColituHardening.UserConfigPath("colitu-config-cache.bin");
+
+    /// <summary>The cache shared by every Windows user before 2.4.1; only an offline fallback, so it is dropped.</summary>
+    private static void DeleteLegacyConfigCache()
+    {
+        try
+        {
+            var legacy = Utils.GetConfigPath("colitu-config-cache.bin");
+            if (File.Exists(legacy)) File.Delete(legacy);
+        }
+        catch
+        {
+            // Best effort.
+        }
+    }
 
     internal static bool IsPlanError(ColituApiException ex) => ex.ErrorCode is "ENTITLEMENT_INACTIVE" or "ENTITLEMENT_EXPIRED";
 
@@ -709,8 +773,10 @@ public sealed class ColituVpnService
         _config.SimpleDNSItem.AddCommonHosts = false;
         _config.SimpleDNSItem.UseSystemHosts = false;
         _config.SimpleDNSItem.Hosts = "";
-        // Info level shows why an outbound failed, which is what support needs from a user's log.
-        _config.CoreBasicItem.Loglevel = "info";
+        // Info level makes the cores print every DNS lookup and connection (the user's browsing);
+        // warnings and errors still show why the tunnel failed. No access log either.
+        _config.CoreBasicItem.Loglevel = "warning";
+        _config.CoreBasicItem.LogEnabled = false;
         // Hysteria2 is not an Xray protocol; it runs on the bundled sing-box core.
         _config.CoreTypeItem = [new CoreTypeItem { ConfigType = EConfigType.Hysteria2, CoreType = ECoreType.sing_box }];
         _coreReady = true;
@@ -849,6 +915,10 @@ public sealed class ColituVpnService
                 token.ThrowIfCancellationRequested();
                 var (candidate, profile) = profiles[index];
                 var isLast = index == profiles.Count - 1;
+                foreach (var host in new[] { profile.Address, profile.Sni })
+                {
+                    if (host.IsNotEmpty()) _serverHosts.Add(host);
+                }
                 if (await ConfigHandler.SetDefaultServerIndex(_config, profile.IndexId) != 0)
                 {
                     throw new InvalidOperationException("Imported server could not be selected as default.");
@@ -877,7 +947,7 @@ public sealed class ColituVpnService
                     LogConnection($"Transport {candidate.Protocol} failed: {ex.Message}");
                 }
 
-                await CoreManager.Instance.CoreStop();
+                await StopCoreAsync();
             }
         }
         finally
@@ -912,8 +982,10 @@ public sealed class ColituVpnService
         var tun = preferences.IsTunMode;
         _config.TunModeItem.EnableTun = tun;
         _config.TunModeItem.AutoRoute = tun;
-        // The app's own WFP kill switch handles leaks; sing-box's strict route would add a second, conflicting set of rules.
-        _config.TunModeItem.StrictRoute = false;
+        // With the kill switch on, its WFP filters stop DNS and other traffic leaving outside the
+        // tunnel, and sing-box's strict route would add a second, conflicting set of rules. Without
+        // it, strict route is what keeps Windows from also asking the network adapter's DNS server.
+        _config.TunModeItem.StrictRoute = tun && !preferences.KillSwitchEnabled;
 
         if (preferences.DnsLeakProtectionEnabled && _config.Inbound.Count > 0)
         {
@@ -1101,7 +1173,7 @@ public sealed class ColituVpnService
         }
 
         LogConnection($"Local port {socksPort} is already in use; stopping previous VPN core.");
-        await CoreManager.Instance.CoreStop();
+        await StopCoreAsync();
 
         for (var attempt = 0; attempt < 10; attempt++)
         {
@@ -1302,13 +1374,32 @@ public sealed class ColituVpnService
 
     private async Task UpdateCoreMessageAsync(bool notify, string message)
     {
-        if (!string.IsNullOrWhiteSpace(message))
+        var line = ColituLogPrivacy.SanitizeCoreLine(message, _serverHosts);
+        if (line != null)
         {
-            _lastCoreMessage = message;
-            LogConnection($"core notify={notify}: {message}");
-            LastError = notify && Status == ColituVpnStatus.Error ? message : LastError;
+            _lastCoreMessage = line;
+            LogConnection($"core notify={notify}: {line}");
+            LastError = notify && Status == ColituVpnStatus.Error ? line : LastError;
         }
         await Task.CompletedTask;
+    }
+
+    /// <summary>Stops the core and removes its generated config files, which contain the server credentials.</summary>
+    private static async Task StopCoreAsync()
+    {
+        await CoreManager.Instance.CoreStop();
+        foreach (var name in new[] { Global.CoreConfigFileName, Global.CorePreConfigFileName })
+        {
+            try
+            {
+                var path = Utils.GetBinConfigPath(name);
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch
+            {
+                // Best effort; the folder is readable by administrators only.
+            }
+        }
     }
 
     private static string FirstNonEmpty(params string?[] values)
@@ -1441,7 +1532,15 @@ public sealed class ColituVpnService
             SelectionMode = _session.SelectionMode,
             Preferences = _session.Preferences.Normalize()
         };
-        File.WriteAllText(StatePath(), JsonSerializer.Serialize(_session, _jsonOptions));
+        try
+        {
+            File.WriteAllText(StatePath(), JsonSerializer.Serialize(_session, _jsonOptions));
+        }
+        catch (Exception ex)
+        {
+            // A locked or unwritable file must not break connecting or status updates.
+            Logging.SaveLog("ColituVpnService.SaveState", ex);
+        }
     }
 
     private static string StatePath() => Utils.GetConfigPath("colitu-vpn-state.json");

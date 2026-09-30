@@ -562,17 +562,7 @@ public partial class ColituMainWindow
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    private static void OpenUrl(string url)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            Logging.SaveLog("ColituMainWindow.OpenUrl", ex);
-        }
-    }
+    private static void OpenUrl(string url) => ColituShell.OpenUrl(url);
 
     private string LocalizedPath(string path) => $"{ColituAuthService.WebBaseUrl}{path}";
 }

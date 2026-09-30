@@ -18,6 +18,9 @@ public sealed partial class ColituSupportService
     public const int MaxFileBytes = 10 << 20;
     public const int MaxFilesPerMessage = 5;
 
+    /// <summary>Largest attachment the app downloads (support files are at most 10 MB; replies from the team a bit more).</summary>
+    private const long MaxDownloadBytes = 50L << 20;
+
     /// <summary>File types the panel stores (it re-checks the content itself).</summary>
     public static readonly string[] AllowedExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".txt", ".log", ".zip", ".json", ".gz"];
 
@@ -65,8 +68,27 @@ public sealed partial class ColituSupportService
         Directory.CreateDirectory(folder);
         var name = string.Concat(Path.GetFileName(attachment.FileName ?? "file").Split(Path.GetInvalidFileNameChars()));
         var path = Path.Combine(folder, $"{attachment.Id[..Math.Min(8, attachment.Id.Length)]}-{(name.Length == 0 ? "file" : name)}");
-        await using var file = File.Create(path);
-        await response.Content.CopyToAsync(file);
+        if (response.Content.Headers.ContentLength > MaxDownloadBytes)
+        {
+            throw new InvalidOperationException("Attachment is too large.");
+        }
+        await using (var source = await response.Content.ReadAsStreamAsync())
+        await using (var file = File.Create(path))
+        {
+            // The server's size header is not trusted: stop writing past the limit.
+            var buffer = new byte[81920];
+            long written = 0;
+            int read;
+            while ((read = await source.ReadAsync(buffer)) > 0)
+            {
+                written += read;
+                if (written > MaxDownloadBytes)
+                {
+                    throw new InvalidOperationException("Attachment is too large.");
+                }
+                await file.WriteAsync(buffer.AsMemory(0, read));
+            }
+        }
         return path;
     }
 
@@ -118,7 +140,9 @@ public sealed partial class ColituSupportService
     /// <summary>
     /// What support needs to reproduce a problem: versions, connection mode and
     /// state, the last error and the tail of today's log. Credentials inside
-    /// share links are masked; browsing history is never collected.
+    /// share links are masked, and core lines about user traffic are removed
+    /// with other host names masked (<see cref="ColituLogPrivacy"/>), so the
+    /// sites a user visited never reach the panel.
     /// </summary>
     public static ColituSupportDiagnostics CollectDiagnostics()
     {
@@ -182,6 +206,7 @@ public sealed partial class ColituSupportService
 
     public static string Redact(string text)
     {
+        text = ColituLogPrivacy.StripTraffic(text);
         text = ShareLinkSecret().Replace(text, "$1***@");
         text = BearerToken().Replace(text, "Bearer ***");
         return JsonSecret().Replace(text, "$1\"***\"");

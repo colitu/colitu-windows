@@ -6,7 +6,7 @@
 #if GetEnv("COLITU_APP_VERSION") != ""
   #define MyAppVersion GetEnv("COLITU_APP_VERSION")
 #else
-  #define MyAppVersion "2.4.0"
+  #define MyAppVersion "2.4.1"
 #endif
 
 #if GetEnv("COLITU_PUBLISH_DIR") != ""
@@ -62,7 +62,16 @@ Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Runtime folders (sessions, logs, generated core configs) never ship: a stray copy from a test run would
+; overwrite the user's own data on every update.
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Excludes: "\guiConfigs\*,\guiLogs\*,\guiTemps\*,\binConfigs\*,\guiBackups\*,\guiUpdates\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; Hidden-window launcher scripts shipped up to 2.4.0; unused, and antivirus heuristics flag them.
+Type: files; Name: "{app}\bin\xray\xray_no_window.ps1"
+Type: files; Name: "{app}\bin\xray\xray_no_window.vbs"
+Type: files; Name: "{app}\xray-dosyalari\xray_no_window.ps1"
+Type: files; Name: "{app}\xray-dosyalari\xray_no_window.vbs"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
@@ -73,7 +82,20 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExeName} /F"; Flags: runhidden; RunOnceId: "KillColituVPN"
+Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExeName} /F"; Flags: runhidden waituntilterminated; RunOnceId: "KillColituVPN"
+; Hands the system proxy back and removes the sign-in task; without it an uninstall while
+; connected leaves every browser pointing at a local proxy that no longer exists.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--colitu-cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "ColituCleanup"
+
+[UninstallDelete]
+; Created at runtime: sessions, cached settings, logs, generated core configs, downloaded updates.
+Type: filesandordirs; Name: "{app}\guiConfigs"
+Type: filesandordirs; Name: "{app}\guiLogs"
+Type: filesandordirs; Name: "{app}\guiTemps"
+Type: filesandordirs; Name: "{app}\binConfigs"
+Type: filesandordirs; Name: "{app}\guiBackups"
+Type: filesandordirs; Name: "{app}\guiUpdates"
+Type: filesandordirs; Name: "{app}\bin"
 
 [Code]
 function InitializeSetup(): Boolean;

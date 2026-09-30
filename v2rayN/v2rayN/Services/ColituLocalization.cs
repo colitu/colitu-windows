@@ -282,7 +282,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["settings.killSwitch"] = ["Kill switch", "Kill switch", "Kill switch"],
         ["settings.killSwitchHint"] = ["Если VPN неожиданно отключится, интернет блокируется, пока защита не вернётся. В режиме TUN трафик мимо VPN запрещён всегда.", "VPN beklenmedik şekilde koparsa koruma geri gelene kadar internet engellenir. TUN modunda VPN dışı trafik her zaman engellenir.", "If the VPN drops unexpectedly, the internet stays blocked until protection is back. In TUN mode, traffic outside the VPN is always blocked."],
         ["settings.dns"] = ["Защита от утечек DNS", "DNS sızıntı koruması", "DNS leak protection"],
-        ["settings.dnsHint"] = ["DNS-запросы идут только через VPN.", "DNS sorguları yalnızca VPN üzerinden gider.", "DNS lookups only go through the VPN."],
+        ["settings.dnsHint"] = ["В режиме TUN все DNS-запросы идут через VPN. В режиме прокси защищены запросы приложений, использующих системный прокси.", "TUN modunda tüm DNS sorguları VPN üzerinden gider. Proxy modunda yalnızca sistem proxy'sini kullanan uygulamaların sorguları korunur.", "In TUN mode every DNS lookup goes through the VPN. In proxy mode only apps that use the system proxy are covered."],
         ["settings.autoConnect"] = ["Автоподключение", "Otomatik bağlan", "Auto-connect"],
         ["settings.autoConnectHint"] = ["Подключаться сразу после запуска приложения.", "Uygulama açılır açılmaz bağlan.", "Connect as soon as the app starts."],
         ["settings.app"] = ["Приложение", "Uygulama", "App"],
@@ -301,6 +301,10 @@ public sealed class Loc : INotifyPropertyChanged
         ["settings.logs"] = ["Открыть журналы", "Günlükleri aç", "Open logs"],
         ["settings.saved"] = ["Сохранено", "Kaydedildi", "Saved"],
         ["settings.reconnectHint"] = ["Изменения применятся при следующем подключении.", "Değişiklik bir sonraki bağlantıda uygulanır.", "Changes apply the next time you connect."],
+        ["about.openSource"] = ["Открытый исходный код", "Açık kaynak", "Open source"],
+        ["about.openSourceHint"] = ["Colitu для Windows распространяется под лицензией GPL-3.0. Код открыт на GitHub: github.com/cyberlexs/colitu-windows", "Colitu Windows uygulaması GPL-3.0 lisanslıdır. Kaynak kodu GitHub'da: github.com/cyberlexs/colitu-windows", "Colitu for Windows is licensed under GPL-3.0. The source code is on GitHub: github.com/cyberlexs/colitu-windows"],
+        ["about.viewSource"] = ["Открыть на GitHub", "GitHub'da aç", "View on GitHub"],
+        ["about.credits"] = ["Основано на v2rayN (GPL-3.0), Xray-core (MPL-2.0) и sing-box (GPL-3.0).", "v2rayN (GPL-3.0), Xray-core (MPL-2.0) ve sing-box (GPL-3.0) üzerine kuruludur.", "Built on v2rayN (GPL-3.0), Xray-core (MPL-2.0) and sing-box (GPL-3.0)."],
         ["brand.credit"] = ["Colitu — продукт компании {brand}.", "Colitu bir {brand} ürünüdür.", "Colitu is a {brand} product."],
 
         // Auth

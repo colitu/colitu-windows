@@ -16,7 +16,9 @@ public partial class CoreConfigV2rayService
             else
             {
                 _coreConfig.log.loglevel = _config.CoreBasicItem.Loglevel;
-                _coreConfig.log.access = null;
+                // Without a path Xray prints its access log (one line per connection, with the
+                // destination) to stdout, which the app would capture: "none" turns it off.
+                _coreConfig.log.access = "none";
                 _coreConfig.log.error = null;
             }
         }

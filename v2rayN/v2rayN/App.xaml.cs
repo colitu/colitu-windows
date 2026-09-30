@@ -33,9 +33,21 @@ public partial class App : Application
             return;
         }
 
+        var args = e.Args ?? Array.Empty<string>();
+        if (args.Any(t => t == UninstallCleanupArg))
+        {
+            // Run by the uninstaller after it has stopped the app.
+            RunUninstallCleanup();
+            Environment.Exit(0);
+            return;
+        }
+
+        // Before logging starts: removes logs of versions that recorded visited sites.
+        Services.ColituHardening.CleanLogs();
+
         var exePathKey = Utils.GetMd5(Utils.GetExePath());
 
-        var rebootas = (e.Args ?? Array.Empty<string>()).Any(t => t == Global.RebootAs);
+        var rebootas = args.Any(t => t == Global.RebootAs);
         ProgramStarted = new EventWaitHandle(false, EventResetMode.AutoReset, exePathKey, out var bCreatedNew);
         if (!rebootas && !bCreatedNew)
         {
@@ -51,7 +63,11 @@ public partial class App : Application
             return;
         }
 
+        Services.ColituHardening.HardenDataFolders();
         AppManager.Instance.InitComponents();
+
+        // Sign-out or shutdown while connected: hand the system proxy back before Windows ends the process.
+        SessionEnding += (_, _) => Services.ColituVpnService.Instance.CleanupForSessionEnd();
 
         RxAppBuilder.CreateReactiveUIBuilder()
             .WithWpf()
@@ -90,6 +106,43 @@ public partial class App : Application
             Logging.SaveLog("StartColituShellAsync", ex);
             UI.Show("Colitu VPN interface could not be opened. Please restart the app and try again.");
             Shutdown();
+        }
+    }
+
+    public const string UninstallCleanupArg = "--colitu-cleanup";
+
+    /// <summary>
+    /// Undoes what the app changed in Windows: the system proxy (only when it
+    /// still points at Colitu's local port, so a user's own proxy is kept) and
+    /// the launch-at-sign-in task. Without this an uninstall while connected
+    /// leaves every browser pointing at a proxy that no longer exists.
+    /// </summary>
+    private static void RunUninstallCleanup()
+    {
+        try
+        {
+            if (!AppManager.Instance.InitApp())
+            {
+                return;
+            }
+            var config = AppManager.Instance.Config;
+            var port = AppManager.Instance.GetLocalPort(EInboundProtocol.socks);
+            using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Internet Settings"))
+            {
+                var enabled = key?.GetValue("ProxyEnable") is int value && value == 1;
+                var server = key?.GetValue("ProxyServer") as string ?? "";
+                if (enabled && (server.Contains($"{Global.Loopback}:{port}") || server.Contains($"localhost:{port}", StringComparison.OrdinalIgnoreCase)))
+                {
+                    ServiceLib.Handler.SysProxy.ProxySettingWindows.UnsetProxy();
+                    Logging.SaveLog("Uninstall cleanup: system proxy removed");
+                }
+            }
+            config.GuiItem.AutoRun = false;
+            AutoStartupHandler.UpdateTask(config).Wait(TimeSpan.FromSeconds(10));
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("RunUninstallCleanup", ex);
         }
     }
 

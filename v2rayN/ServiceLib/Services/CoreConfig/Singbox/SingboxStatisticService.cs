@@ -4,12 +4,15 @@ public partial class CoreConfigSingboxService
 {
     private void GenExperimental()
     {
-        //if (_config.guiItem.enableStatistics)
+        // The control API lists every connection (the sites in use) and can change routing:
+        // only open it when statistics need it, and never without a secret.
+        if (_config.GuiItem.EnableStatistics || _config.GuiItem.DisplayRealTimeSpeed)
         {
             _coreConfig.experimental ??= new Experimental4Sbox();
             _coreConfig.experimental.clash_api = new Clash_Api4Sbox()
             {
                 external_controller = $"{Global.Loopback}:{AppManager.Instance.StatePort2}",
+                secret = AppManager.Instance.ClashApiSecret,
             };
         }
 

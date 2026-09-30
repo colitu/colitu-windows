@@ -79,11 +79,15 @@ public partial class SetupWindow : Window
     {
         var exeDir = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? AppDomain.CurrentDomain.BaseDirectory;
 
+        // Only the folder the installer put next to the app. Parent folders are not searched:
+        // anyone can create C:\xray-dosyalari, and whatever is copied from there runs as administrator.
         var candidates = new[]
         {
             Path.Combine(exeDir, "xray-dosyalari"),
-            Path.Combine(exeDir, "..", "xray-dosyalari"),
-            Path.Combine(exeDir, "..", "..", "xray-dosyalari"),
+#if DEBUG
+            // Development runs from v2rayN\bin\Debug\...
+            Path.Combine(exeDir, "..", "..", "..", "..", "..", "xray-dosyalari"),
+#endif
         };
 
         foreach (var dir in candidates)

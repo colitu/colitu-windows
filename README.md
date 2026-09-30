@@ -10,7 +10,7 @@ top that handles the account, servers and connection through the Colitu API.
 | | |
 |---|---|
 | App | `Colitu VPN` (`ColituVPN.exe`), WPF on .NET 8 |
-| Version | `2.4.0` (`v2rayN/Directory.Build.props`) |
+| Version | `2.4.1` (`v2rayN/Directory.Build.props`) |
 | OS | Windows 10 / 11, x64 |
 | Languages | Russian, English, Turkish |
 | Website | <https://colitu.com> · [downloads](https://colitu.com/downloads/windows) |
@@ -36,8 +36,15 @@ top that handles the account, servers and connection through the Colitu API.
   support inbox with ticket replies.
 - **Secure token storage.** Tokens are encrypted with Windows DPAPI
   (`CurrentUser`); refresh tokens are single-use and rotated on every refresh.
-- **Verified auto-update.** Updates are downloaded over HTTPS from `colitu.com`
-  and installed only when their SHA-256 matches the published `latest.json`.
+- **Verified auto-update.** `latest.json` is signed offline (ECDSA P-256) and
+  the app only accepts a manifest that verifies against its built-in public key.
+  The installer is downloaded over HTTPS from `colitu.com` into a folder only
+  administrators can write, and runs only when its SHA-256 matches the signed
+  manifest.
+- **Private logs.** The VPN cores log at warning level; lines about DNS lookups
+  and connections are dropped and other host names masked, so the sites a user
+  visits are never written to disk or sent with a support request. Session,
+  config and log folders are readable by administrators only.
 
 ## How it connects
 
@@ -97,18 +104,21 @@ from the official releases and check their hashes:
 Then run:
 
 ```powershell
-.\scripts\build-installer.ps1 -Version 2.4.0
+pwsh .\scripts\build-installer.ps1 -Version 2.4.1
 ```
 
 The output in `artifacts/installer/` is `ColituVPN-Setup-<version>-x64.exe`, a
 fixed-name copy `ColituVPN-Setup-x64.exe`, and `latest.json` for the updater.
+The script signs `latest.json` with the release key given by `-SigningKeyPath`
+(or `COLITU_UPDATE_SIGNING_KEY`); the key is never part of this repository, and
+a manifest without a valid signature is ignored by the app.
 Signing the installer with a code-signing certificate avoids the SmartScreen
 warning.
 
 ### Pointing at another API
 
-Set the `COLITU_API_BASE_URL` environment variable, or create
-`guiConfigs/colitu-api.json` next to the app:
+Create `guiConfigs/colitu-api.json` next to the app (an `https://` address;
+debug builds also read the `COLITU_API_BASE_URL` environment variable):
 
 ```json
 { "apiBaseUrl": "https://staging.example.com/api/v1" }

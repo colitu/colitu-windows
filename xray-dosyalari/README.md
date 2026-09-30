@@ -7,7 +7,6 @@
 | `xray.exe` | [XTLS/Xray-core](https://github.com/XTLS/Xray-core/releases) `Xray-windows-64.zip` — şu an **Xray 26.5.3 (228f1e1)** | Hayır (`*.exe` yok sayılır) |
 | `wintun.dll` | [wintun.net](https://www.wintun.net/) amd64 | Evet |
 | `geoip.dat`, `geosite.dat` | Xray yönlendirme verileri | Evet |
-| `xray_no_window.ps1`, `xray_no_window.vbs` | Colitu yardımcı betikleri | Evet |
 
 Kurulum paketi üretmeden önce `xray.exe` dosyasını resmi Xray-core sürümünden
 indirip bu klasöre koyun ve SHA256 değerini yayın notuyla karşılaştırın.

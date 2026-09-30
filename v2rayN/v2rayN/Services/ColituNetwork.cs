@@ -163,7 +163,9 @@ public static class ColituNetwork
             var metrics = DefaultRouteMetrics();
             return NetworkInterface.GetAllNetworkInterfaces()
                 .Where(adapter => adapter.OperationalStatus == OperationalStatus.Up && IsVirtual(adapter))
-                .Where(adapter => !adapter.Name.Contains("xray_tun", StringComparison.OrdinalIgnoreCase))
+                // Colitu's own TUN adapters (Xray and sing-box) are not "another VPN".
+                .Where(adapter => !adapter.Name.Contains("xray_tun", StringComparison.OrdinalIgnoreCase)
+                    && !adapter.Name.Contains("singbox_tun", StringComparison.OrdinalIgnoreCase))
                 .Where(adapter =>
                 {
                     try

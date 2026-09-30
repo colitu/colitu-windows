@@ -120,7 +120,7 @@ public partial class ColituMainWindow
 
     private void Terms_Click(object sender, RoutedEventArgs e) => OpenUrl(LocalizedPath("/legal/terms"));
 
-    private void Logs_Click(object sender, RoutedEventArgs e) => OpenUrl(Utils.GetLogPath());
+    private void Logs_Click(object sender, RoutedEventArgs e) => ColituShell.OpenFolder(Utils.GetLogPath());
 
     // ── Updates ────────────────────────────────────────────────────────────
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync(quiet: false);
