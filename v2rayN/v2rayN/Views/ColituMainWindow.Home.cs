@@ -387,6 +387,8 @@ public partial class ColituMainWindow
             HomeKillSwitch.IsChecked = SettingsKillSwitch.IsChecked = preferences.KillSwitchEnabled;
             HomeAutoConnect.IsChecked = SettingsAutoConnect.IsChecked = preferences.AutoConnectEnabled;
             SettingsDns.IsChecked = preferences.DnsLeakProtectionEnabled;
+            SettingsAdBlock.IsChecked = preferences.AdBlockEnabled;
+            SettingsAdBlockRow.Visibility = ColituVpnService.AdBlockAvailable ? Visibility.Visible : Visibility.Collapsed;
             SettingsTray.IsChecked = preferences.CloseToTray;
             SettingsStartup.IsChecked = _vpn.LaunchAtStartup;
             ApplyModeHint();
@@ -430,6 +432,7 @@ public partial class ColituMainWindow
         preferences = box == HomeKillSwitch || box == SettingsKillSwitch ? preferences with { KillSwitchEnabled = on }
             : box == HomeAutoConnect || box == SettingsAutoConnect ? preferences with { AutoConnectEnabled = on }
             : box == SettingsDns ? preferences with { DnsLeakProtectionEnabled = on }
+            : box == SettingsAdBlock ? preferences with { AdBlockEnabled = on }
             : box == SettingsTray ? preferences with { CloseToTray = on }
             : preferences;
         await SavePreferencesAsync(preferences);
@@ -438,7 +441,8 @@ public partial class ColituMainWindow
     private async Task SavePreferencesAsync(ColituVpnPreferences preferences)
     {
         var tunnelSettingsChanged = preferences.ConnectionMode != _vpn.Preferences.ConnectionMode
-            || preferences.DnsLeakProtectionEnabled != _vpn.Preferences.DnsLeakProtectionEnabled;
+            || preferences.DnsLeakProtectionEnabled != _vpn.Preferences.DnsLeakProtectionEnabled
+            || preferences.AdBlockEnabled != _vpn.Preferences.AdBlockEnabled;
         try
         {
             await _vpn.UpdatePreferencesAsync(preferences);
@@ -451,7 +455,7 @@ public partial class ColituMainWindow
 
         if (tunnelSettingsChanged && _vpn.Status == ColituVpnStatus.Connected)
         {
-            // Mode, kill switch and DNS protection are part of the core config: reconnect to apply.
+            // Mode, kill switch, DNS protection and ad blocking are part of the core config: reconnect to apply.
             try
             {
                 await _vpn.ReconnectAsync();

@@ -302,6 +302,8 @@ public sealed class Loc : INotifyPropertyChanged
         ["settings.dnsHint"] = ["В режиме TUN все DNS-запросы идут через VPN. В режиме прокси защищены запросы приложений, использующих системный прокси.", "TUN modunda tüm DNS sorguları VPN üzerinden gider. Proxy modunda yalnızca sistem proxy'sini kullanan uygulamaların sorguları korunur.", "In TUN mode every DNS lookup goes through the VPN. In proxy mode only apps that use the system proxy are covered."],
         ["settings.autoConnect"] = ["Автоподключение", "Otomatik bağlan", "Auto-connect"],
         ["settings.autoConnectHint"] = ["Подключаться сразу после запуска приложения.", "Uygulama açılır açılmaz bağlan.", "Connect as soon as the app starts."],
+        ["settings.adBlock"] = ["Блокировка рекламы", "Reklam engelleme", "Ad blocking"],
+        ["settings.adBlockHint"] = ["Реклама и трекеры блокируются на DNS-серверах Colitu. Журнал запросов не ведётся. Если какой-то сайт сломается, выключите.", "Reklam ve izleyiciler Colitu DNS sunucularında engellenir. Sorgu kaydı tutulmaz. Bir site bozulursa kapatın.", "Ads and trackers are blocked on Colitu’s DNS servers. No query log is kept. If a site breaks, turn it off."],
         ["settings.app"] = ["Приложение", "Uygulama", "App"],
         ["settings.startup"] = ["Запускать вместе с Windows", "Windows ile başlat", "Start with Windows"],
         ["settings.startupHint"] = ["Colitu откроется в трее при входе в Windows.", "Colitu, Windows oturumu açıldığında tepside başlar.", "Colitu starts in the tray when you sign in to Windows."],
@@ -398,6 +400,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["cat.speed"] = ["Скорость", "Hız", "Speed"],
         ["cat.torrent"] = ["Торренты", "Torrent", "Torrent"],
         ["cat.ai"] = ["ИИ", "Yapay zekâ", "AI"],
+        ["cat.adblock"] = ["Блокировка рекламы", "Reklam engelleme", "Ad blocking"],
         ["cat.empty"] = ["В этой категории пока нет серверов.", "Bu kategoride henüz sunucu yok.", "No servers in this category yet."],
 
         // Live support

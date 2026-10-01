@@ -1,11 +1,14 @@
 param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
-    [string]$Version = "2.4.4",
+    [string]$Version = "2.5.0",
     [switch]$SkipPublish,
     # ECDSA P-256 private key (PKCS#8 PEM) that signs latest.json. Keep it off the repository;
     # the app only installs updates whose manifest verifies against the embedded public key.
-    [string]$SigningKeyPath = $(if ($env:COLITU_UPDATE_SIGNING_KEY) { $env:COLITU_UPDATE_SIGNING_KEY } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-windows--update-signing-private.pem" })
+    [string]$SigningKeyPath = $(if ($env:COLITU_UPDATE_SIGNING_KEY) { $env:COLITU_UPDATE_SIGNING_KEY } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-windows--update-signing-private.pem" }),
+    # Comma-separated ad-blocking DoH URLs. They point at Colitu's own nodes, so like the signing
+    # key they stay out of the repository; the build embeds them (ColituAdBlockDoh assembly metadata).
+    [string]$AdBlockDohPath = $(if ($env:COLITU_ADBLOCK_DOH_FILE) { $env:COLITU_ADBLOCK_DOH_FILE } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-adblock-doh.txt" })
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +63,9 @@ Assert-FileExists (Join-Path $xraySourceDir "geoip.dat") "geoip.dat"
 Assert-FileExists (Join-Path $xraySourceDir "geosite.dat") "geosite.dat"
 Assert-FileExists (Join-Path $singboxSourceDir "sing-box.exe") "sing-box.exe"
 Assert-FileExists $SigningKeyPath "Update manifest signing key"
+Assert-FileExists $AdBlockDohPath "Ad-blocking DoH server list"
+$adBlockDoh = (Get-Content -LiteralPath $AdBlockDohPath -Raw).Trim()
+if (-not $adBlockDoh.StartsWith("https://")) { throw "The ad-blocking DoH server list is empty or invalid: $AdBlockDohPath" }
 
 # Start from an empty folder: running the published app for a test leaves its database,
 # logs and session there, and the installer would ship them to every user.
@@ -71,6 +77,8 @@ New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
 
 if (-not $SkipPublish) {
     Write-Host "Publishing app..." -ForegroundColor Cyan
+    # Passed as an environment variable: on the command line MSBuild would split it at the commas.
+    $env:ColituAdBlockDoh = $adBlockDoh
     dotnet publish $projectPath `
         --configuration $Configuration `
         --runtime $Runtime `

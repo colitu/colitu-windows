@@ -222,6 +222,10 @@ public sealed class ColituServerRow
     public Uri? FlagUri { get; init; }
     public Visibility FlagVisibility => FlagUri == null ? Visibility.Collapsed : Visibility.Visible;
     public Visibility AutoVisibility => IsAuto ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>The node runs one of Colitu's ad-blocking DNS servers.</summary>
+    public bool AdBlock { get; init; }
+    public Visibility AdBlockVisibility => AdBlock ? Visibility.Visible : Visibility.Collapsed;
+    public string AdBlockText => Loc.I["cat.adblock"];
     public int LoadLevel { get; init; }
     public string? LoadText => LoadLevel > 0 ? Loc.I[LoadLevel switch { 1 => "server.load.low", 2 => "server.load.medium", _ => "server.load.high" }] : null;
 
@@ -284,6 +288,7 @@ public sealed class ColituServerRow
             Subtitle = string.Join(" · ", details),
             FlagUri = server.HasLocalFlag ? server.FlagResourceUri : null,
             Ping = ping,
+            AdBlock = ColituVpnService.HostsAdBlockDns(server.Host),
             LoadLevel = server.Load switch
             {
                 null => 0,

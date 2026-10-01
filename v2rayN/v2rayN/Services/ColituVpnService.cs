@@ -995,8 +995,40 @@ public sealed class ColituVpnService
             _config.Inbound.First().SniffingEnabled = true;
         }
 
+        // Ad blocking: lookups go to Colitu's AdGuard Home servers (DoH through the tunnel), which
+        // answer 0.0.0.0 for ad and tracker domains. In TUN mode that already stops the apps; in
+        // proxy mode the browser hands the domain to the core, so the core resolves it first
+        // (IPIfNonMatch) and the 0.0.0.0 rule in BuildColituRoutingRules drops the connection.
+        _config.SimpleDNSItem ??= new SimpleDNSItem();
+        _config.SimpleDNSItem.RemoteDNS = (preferences.AdBlockEnabled && AdBlockAvailable)
+            ? string.Join(",", ColituAdBlockDohServers)
+            : Global.DomainRemoteDNSAddress.First();
+        _config.RoutingBasicItem.DomainStrategy = (preferences.AdBlockEnabled && AdBlockAvailable) ? Global.IPIfNonMatch : Global.AsIs;
+
         await ConfigHandler.SaveConfig(_config);
     }
+
+    /// <summary>
+    /// Colitu's ad-blocking DNS servers, tried in order. They are Colitu's own nodes, so they are
+    /// not in the public source: scripts/build-installer.ps1 embeds them as assembly metadata.
+    /// Builds without them have no ad blocking (the switch is hidden).
+    /// </summary>
+    internal static readonly string[] ColituAdBlockDohServers = ParseAdBlockDohServers(
+        typeof(ColituVpnService).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+            .OfType<System.Reflection.AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "ColituAdBlockDoh")?.Value);
+
+    internal static bool AdBlockAvailable => ColituAdBlockDohServers.Length > 0;
+
+    internal static string[] ParseAdBlockDohServers(string? value) =>
+        (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && Uri.TryCreate(url, UriKind.Absolute, out _))
+            .ToArray();
+
+    /// <summary>Whether a node (by its probe host) runs one of <see cref="ColituAdBlockDohServers"/>; the server list tags it.</summary>
+    internal static bool HostsAdBlockDns(string? host) =>
+        !string.IsNullOrWhiteSpace(host)
+        && ColituAdBlockDohServers.Any(url => string.Equals(new Uri(url).Host, host.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private async Task EnsureColituRoutingAsync(ColituVpnPreferences preferences)
     {
@@ -1047,6 +1079,15 @@ public sealed class ColituVpnService
             Port = "53",
             Network = "tcp,udp",
             Enabled = preferences.DnsLeakProtectionEnabled
+        });
+
+        rules.Add(new RulesItem
+        {
+            Id = "colitu-ad-block",
+            Remarks = "Ad blocking: domains Colitu DNS answers with 0.0.0.0",
+            OutboundTag = Global.BlockTag,
+            Ip = ["0.0.0.0/32", "::/128"],
+            Enabled = (preferences.AdBlockEnabled && AdBlockAvailable)
         });
 
         return rules;
@@ -1831,7 +1872,8 @@ public sealed record ColituVpnPreferences(
     string? PreviousRoutingId = null,
     string Language = "",
     string ConnectionMode = ColituConnectionModes.Proxy,
-    bool CloseToTray = true)
+    bool CloseToTray = true,
+    bool AdBlockEnabled = false)
 {
     public bool IsTunMode => string.Equals(ConnectionMode, ColituConnectionModes.Tun, StringComparison.OrdinalIgnoreCase);
 

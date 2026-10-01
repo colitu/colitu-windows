@@ -24,6 +24,11 @@
 		<PackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 
+	<!-- Ad-blocking DoH servers, given by scripts/build-installer.ps1 (kept out of the repository). -->
+	<ItemGroup Condition="'$(ColituAdBlockDoh)' != ''">
+		<AssemblyMetadata Include="ColituAdBlockDoh" Value="$(ColituAdBlockDoh)" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<AdditionalFiles Include="app.manifest" />
 		<EmbeddedResource Include="Resources\colitu.ico">

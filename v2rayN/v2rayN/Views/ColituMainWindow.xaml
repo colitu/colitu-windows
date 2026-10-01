@@ -114,7 +114,13 @@
                     </Grid.ColumnDefinitions>
                     <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FlagTemplate}" />
                     <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center">
-                        <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                            <!-- The node runs one of Colitu's ad-blocking DNS servers. -->
+                            <Border Margin="8,1,0,0" Padding="7,1" VerticalAlignment="Center" Background="#268B78FF" CornerRadius="8" Visibility="{Binding AdBlockVisibility}">
+                                <TextBlock FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource LilacBrush}" Text="{Binding AdBlockText}" />
+                            </Border>
+                        </StackPanel>
                         <TextBlock Margin="0,2,0,0" FontSize="12.5" Foreground="{StaticResource MutedBrush}" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <!-- Ping from this PC (measured outside the tunnel) with signal bars; the load is in the tooltip. -->
@@ -839,6 +845,17 @@
                                                 <TextBlock Margin="0,3,0,0" Style="{StaticResource Small}" Text="{s:T settings.dnsHint}" />
                                             </StackPanel>
                                             <CheckBox x:Name="SettingsDns" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
+                                        </Grid>
+                                        <Grid x:Name="SettingsAdBlockRow" Margin="0,18,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,16,0">
+                                                <TextBlock FontSize="14.5" FontWeight="Medium" Text="{s:T settings.adBlock}" />
+                                                <TextBlock Margin="0,3,0,0" Style="{StaticResource Small}" Text="{s:T settings.adBlockHint}" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="SettingsAdBlock" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
                                         </Grid>
                                         <Grid Margin="0,18,0,0">
                                             <Grid.ColumnDefinitions>
