@@ -1,0 +1,66 @@
+name: Release checksums
+
+# Adds SHA256SUMS (computed by GitHub from the attached files) and an SBOM to
+# a release. Runs when a release is published, by hand for any tag, and once
+# for the latest release whenever this workflow changes.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v2.4.4)
+        required: true
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release-checksums.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  checksums:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick the release
+        id: release
+        run: |
+          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "$tag" ]; then tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Release: $tag"
+
+      - name: Download the release files
+        run: |
+          mkdir -p release
+          gh release download "${{ steps.release.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --dir release --pattern '*.exe' --pattern '*.apk' --pattern '*.aab' --pattern '*.zip' --skip-existing
+          ls -la release
+
+      - name: Write SHA256SUMS
+        working-directory: release
+        run: |
+          shopt -s nullglob
+          files=( *.exe *.apk *.aab *.zip )
+          [ ${#files[@]} -gt 0 ] || { echo "no release files"; exit 1; }
+          sha256sum -- "${files[@]}" | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+          test -s SHA256SUMS
+
+      - name: Source SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: release/colitu-windows-${{ steps.release.outputs.tag }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attach to the release
+        run: |
+          files="release/SHA256SUMS"
+          for sbom in release/*.spdx.json; do if [ -e "$sbom" ]; then files="$files $sbom"; fi; done
+          gh release upload "${{ steps.release.outputs.tag }}" $files --repo "$GITHUB_REPOSITORY" --clobber
