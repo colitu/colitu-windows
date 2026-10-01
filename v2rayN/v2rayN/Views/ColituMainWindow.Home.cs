@@ -109,7 +109,7 @@ public partial class ColituMainWindow
         ConnectButton.ToolTip = on ? loc["home.disconnect"] : busy ? loc["home.cancel"] : loc["home.connect"];
         var protocol = on ? _vpn.ConnectedProtocol : null;
         ProtocolChip.Visibility = protocol is { Length: > 0 } ? Visibility.Visible : Visibility.Collapsed;
-        ProtocolChipText.Text = protocol is { Length: > 0 } ? $"{loc["home.protocol"]} · {protocol}".ToUpper(loc.Culture) : "";
+        ProtocolChipText.Text = protocol is { Length: > 0 } ? $"{loc["home.protocol"]} · {ColituTransportNames.Of(protocol, loc)}".ToUpper(loc.Culture) : "";
 
         StatusChipText.Text = on ? loc["status.protected"]
             : blocked ? loc["status.blocked"]

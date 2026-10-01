@@ -161,6 +161,13 @@ public sealed class Loc : INotifyPropertyChanged
         ["home.tapOff"] = ["Нажмите, чтобы отключить", "Kesmek için tıklayın", "Click to disconnect"],
         ["home.tapCancel"] = ["Нажмите, чтобы отменить", "İptal etmek için tıklayın", "Click to cancel"],
         ["home.protocol"] = ["Протокол", "Protokol", "Protocol"],
+        // Colitu names of the transports; the technical names stay out of the UI.
+        ["transport.hysteria2"] = ["Быстрый", "Hızlı", "Fast"],
+        ["transport.vless-reality"] = ["Скрытный", "Gizli", "Stealth"],
+        ["transport.vless-xhttp"] = ["Устойчивый", "Dayanıklı", "Resilient"],
+        ["transport.trojan"] = ["Классический", "Klasik", "Classic"],
+        ["transport.shadowsocks"] = ["Лёгкий", "Hafif", "Light"],
+        ["transport.other"] = ["Резервный", "Yedek", "Backup"],
         ["home.changeServer"] = ["Сменить сервер", "Sunucuyu değiştir", "Change server"],
         ["home.session"] = ["Время подключения", "Bağlantı süresi", "Connection time"],
         ["home.location"] = ["ЛОКАЦИЯ", "KONUM", "LOCATION"],
@@ -466,5 +473,20 @@ public sealed class T : MarkupExtension
     {
         var binding = new Binding($"[{Key}]") { Source = Loc.I, Mode = BindingMode.OneWay };
         return binding.ProvideValue(serviceProvider);
+    }
+}
+
+/// <summary>
+/// Colitu's own name of a panel transport ("Fast" for Hysteria2 and so on):
+/// the technical protocol names stay out of the UI.
+/// </summary>
+public static class ColituTransportNames
+{
+    private static readonly HashSet<string> Known = ["hysteria2", "vless-reality", "vless-xhttp", "trojan", "shadowsocks"];
+
+    public static string Of(string? protocol, Loc loc)
+    {
+        if (string.IsNullOrEmpty(protocol)) return "";
+        return loc[Known.Contains(protocol) ? $"transport.{protocol}" : "transport.other"];
     }
 }

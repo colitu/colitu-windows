@@ -28,7 +28,7 @@ public sealed class ColituAuthService
 
     /// <summary>Config formats and transports this build can run: Xray for TCP transports, sing-box for Hysteria2.</summary>
     private static readonly string[] SupportedConfigFormats = ["xray-mobile-v1"];
-    private static readonly string[] SupportedProtocols = ["hysteria2", "vless-reality", "trojan", "shadowsocks"];
+    private static readonly string[] SupportedProtocols = ["hysteria2", "vless-reality", "vless-xhttp", "trojan", "shadowsocks"];
 
     // Direct to the panel: while the tunnel restarts the system proxy still points at the stopped core.
     private readonly HttpClient _httpClient = new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(20) };

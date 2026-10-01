@@ -377,8 +377,11 @@ public static class ColituShareLinkBuilder
         }
 
         var network = Str(transport, "type") ?? "tcp";
-        // "hysteria" is the QUIC transport of hysteria2 itself; TCP protocols cannot ride on it.
-        if (network is not ("tcp" or "ws" or "grpc" or "hysteria") || (network == "hysteria") != (protocol == "hysteria2"))
+        // "hysteria" is the QUIC transport of hysteria2 itself and "xhttp" the one of vless-xhttp;
+        // no other protocol rides on them.
+        if (network is not ("tcp" or "ws" or "grpc" or "hysteria" or "xhttp")
+            || (network == "hysteria") != (protocol == "hysteria2")
+            || (network == "xhttp") != (protocol == "vless-xhttp"))
         {
             return null;
         }
@@ -412,6 +415,34 @@ public static class ColituShareLinkBuilder
                 {
                     query.Insert(1, "flow=xtls-rprx-vision");
                 }
+                return $"vless://{Uri.EscapeDataString(uuid!)}@{address}:{port}?{string.Join("&", query)}{fragment}";
+            }
+            case "vless-xhttp":
+            {
+                // VLESS over XHTTP with Reality; no Vision flow, XHTTP carries no raw TCP stream.
+                var uuid = Str(credentials, "uuid");
+                var sni = Str(security, "server_name");
+                var publicKey = Str(security, "public_key");
+                var shortId = Str(security, "short_id");
+                var path = Str(transport, "path");
+                var mode = Str(transport, "mode") ?? "auto";
+                if (uuid.IsNullOrEmpty() || sni.IsNullOrEmpty() || publicKey.IsNullOrEmpty() || shortId == null
+                    || path.IsNullOrEmpty() || !path!.StartsWith('/') || Str(security, "type") != "reality")
+                {
+                    return null;
+                }
+                var query = new List<string>
+                {
+                    "encryption=none",
+                    "security=reality",
+                    $"sni={Uri.EscapeDataString(sni!)}",
+                    $"fp={Uri.EscapeDataString(Str(security, "fingerprint") ?? "chrome")}",
+                    $"pbk={Uri.EscapeDataString(publicKey!)}",
+                    $"sid={Uri.EscapeDataString(shortId)}",
+                    "type=xhttp",
+                    $"path={Uri.EscapeDataString(path)}",
+                    $"mode={Uri.EscapeDataString(mode)}"
+                };
                 return $"vless://{Uri.EscapeDataString(uuid!)}@{address}:{port}?{string.Join("&", query)}{fragment}";
             }
             case "trojan":

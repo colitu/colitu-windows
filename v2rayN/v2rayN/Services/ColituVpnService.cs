@@ -806,12 +806,15 @@ public sealed class ColituVpnService
             var type = candidate.Protocol switch
             {
                 "hysteria2" => EConfigType.Hysteria2,
-                "vless-reality" => EConfigType.VLESS,
+                "vless-reality" or "vless-xhttp" => EConfigType.VLESS,
                 "trojan" => EConfigType.Trojan,
                 "shadowsocks" => EConfigType.Shadowsocks,
                 _ => (EConfigType?)null
             };
-            var profile = profiles.FirstOrDefault(item => type != null && item.ConfigType == type && !used.Contains(item.IndexId));
+            // Both VLESS transports import as VLESS profiles; the network tells them apart.
+            var xhttp = candidate.Protocol == "vless-xhttp";
+            var profile = profiles.FirstOrDefault(item => type != null && item.ConfigType == type && !used.Contains(item.IndexId)
+                && (type != EConfigType.VLESS || string.Equals(item.Network, "xhttp", StringComparison.OrdinalIgnoreCase) == xhttp));
             if (profile == null) continue;
             used.Add(profile.IndexId);
             ordered.Add((candidate, profile));
