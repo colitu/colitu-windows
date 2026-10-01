@@ -166,6 +166,7 @@ public partial class ColituMainWindow
             ApplyAccount();
             RenderServers();
             ApplyStatus();
+            _ = MeasurePingsAsync();
             if (_page == "account")
             {
                 await LoadDevicesAsync();
@@ -273,9 +274,7 @@ public partial class ColituMainWindow
         {
             case "locations":
                 RenderServers();
-                break;
-            case "plan":
-                _ = LoadPricingAsync();
+                _ = MeasurePingsAsync();
                 break;
             case "account":
                 _ = LoadDevicesAsync();
@@ -343,7 +342,6 @@ public partial class ColituMainWindow
         RenderServers();
         ApplyVerifyTexts();
         RenderSupportList();
-        RenderPricing();
         _ = LoadDevicesAsync();
         Dispatcher.BeginInvoke(() => MoveNavThumb(false), DispatcherPriority.Loaded);
     }

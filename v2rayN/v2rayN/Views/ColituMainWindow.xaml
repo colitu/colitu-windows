@@ -73,7 +73,8 @@
                         <Grid.Clip>
                             <EllipseGeometry Center="17,17" RadiusX="17" RadiusY="17" />
                         </Grid.Clip>
-                        <svgc:SvgViewbox Width="46" Height="34" HorizontalAlignment="Center" Source="{Binding FlagUri}" Stretch="UniformToFill" />
+                        <!-- The flags are square (flag-icons 1x1), so they fill the circle as is. -->
+                        <svgc:SvgViewbox Width="34" Height="34" HorizontalAlignment="Center" VerticalAlignment="Center" Source="{Binding FlagUri}" Stretch="Uniform" />
                     </Grid>
                     <Path Width="15" Height="15" Data="{StaticResource IconBolt}" Fill="{StaticResource LilacBrush}" Stretch="Uniform" Visibility="{Binding AutoVisibility}" />
                     <Ellipse Stroke="#26FFFFFF" StrokeThickness="1" />
@@ -116,10 +117,14 @@
                         <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
                         <TextBlock Margin="0,2,0,0" FontSize="12.5" Foreground="{StaticResource MutedBrush}" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <StackPanel Grid.Column="2" Margin="0,0,16,0" VerticalAlignment="Center" Orientation="Horizontal" ToolTip="{Binding LoadText}" Visibility="{Binding LoadVisibility}">
-                        <Border Width="4" Height="8" Margin="0,0,3,0" VerticalAlignment="Bottom" Background="{Binding LoadBar1}" CornerRadius="2" />
-                        <Border Width="4" Height="12" Margin="0,0,3,0" VerticalAlignment="Bottom" Background="{Binding LoadBar2}" CornerRadius="2" />
-                        <Border Width="4" Height="16" VerticalAlignment="Bottom" Background="{Binding LoadBar3}" CornerRadius="2" />
+                    <!-- Ping from this PC (measured outside the tunnel) with signal bars; the load is in the tooltip. -->
+                    <StackPanel Grid.Column="2" Margin="0,0,16,0" VerticalAlignment="Center" Orientation="Horizontal" ToolTip="{Binding PingToolTip}" Visibility="{Binding PingVisibility}">
+                        <TextBlock MinWidth="52" Margin="0,0,10,0" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{Binding PingTextBrush}" Text="{Binding PingText}" TextAlignment="Right" />
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+                            <Border Width="4" Height="8" Margin="0,0,3,0" VerticalAlignment="Bottom" Background="{Binding PingBar1}" CornerRadius="2" />
+                            <Border Width="4" Height="12" Margin="0,0,3,0" VerticalAlignment="Bottom" Background="{Binding PingBar2}" CornerRadius="2" />
+                            <Border Width="4" Height="16" VerticalAlignment="Bottom" Background="{Binding PingBar3}" CornerRadius="2" />
+                        </StackPanel>
                     </StackPanel>
                     <Border Grid.Column="3" MinWidth="92" Style="{StaticResource Badge}" Visibility="{Binding StateVisibility}" Background="{Binding StateBackground}">
                         <TextBlock HorizontalAlignment="Center" Foreground="{Binding StateForeground}" Style="{StaticResource BadgeText}" Text="{Binding StateText}" />
@@ -639,116 +644,41 @@
                             </Grid>
                         </Border>
 
-                        <Grid x:Name="PricingLoading" Height="260" Visibility="Collapsed">
-                            <Ellipse Style="{StaticResource Spinner}" />
-                        </Grid>
-                        <StackPanel x:Name="PricingError" Margin="0,60,0,0" HorizontalAlignment="Center" Visibility="Collapsed">
-                            <TextBlock HorizontalAlignment="Center" Style="{StaticResource Muted}" Text="{s:T pricing.loadFailed}" />
-                            <Button Height="40" Margin="0,16,0,0" HorizontalAlignment="Center" Click="PricingRetry_Click" Content="{s:T pricing.retry}" Style="{StaticResource SecondaryButton}" />
-                        </StackPanel>
-
-                        <Grid x:Name="PricingContent" Margin="0,16,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="16" />
-                                <ColumnDefinition Width="340" />
-                            </Grid.ColumnDefinitions>
-
-                            <Border Padding="28" Style="{StaticResource Panel}">
-                                <StackPanel>
-                                    <Border CornerRadius="18" Style="{StaticResource SegmentHost}">
-                                        <UniformGrid x:Name="DurationList" Rows="1" />
-                                    </Border>
-
-                                    <StackPanel x:Name="PlanFocus" Margin="0,26,0,0">
-                                        <WrapPanel VerticalAlignment="Center">
-                                            <TextBlock x:Name="FocusDuration" Margin="0,0,10,0" VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold" />
-                                            <Border x:Name="FocusOff" Margin="0,0,10,0" Background="#265EE0A0" BorderThickness="0" CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={StaticResource PillRadius}}" Padding="9,3">
-                                                <TextBlock x:Name="FocusOffText" FontSize="11.5" FontWeight="Bold" Foreground="{StaticResource SuccessBrush}" />
-                                            </Border>
-                                            <TextBlock x:Name="FocusBest" VerticalAlignment="Center" Style="{StaticResource Kicker}" Text="{s:T pricing.best}" />
-                                        </WrapPanel>
-                                        <StackPanel Margin="0,10,0,0" Orientation="Horizontal">
-                                            <TextBlock x:Name="FocusPrice" FontSize="48" FontWeight="SemiBold" />
-                                            <TextBlock Margin="12,0,0,10" VerticalAlignment="Bottom" Style="{StaticResource Muted}" Text="{s:T pricing.perDevice}" />
-                                        </StackPanel>
-                                        <TextBlock x:Name="FocusSaving" Margin="0,4,0,0" FontSize="13.5" FontWeight="Medium" Foreground="{StaticResource SuccessBrush}" />
-                                    </StackPanel>
-
-                                    <Border Height="1" Margin="0,24,0,0" Background="{StaticResource LineBrush}" />
-
-                                    <Grid Margin="0,18,0,0">
-                                        <TextBlock VerticalAlignment="Center" Style="{StaticResource Body}" FontWeight="Medium" Text="{s:T pricing.devices}" />
-                                        <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
-                                            <Button x:Name="DeviceMinus" Click="DeviceMinus_Click" Style="{StaticResource CounterButton}">
-                                                <Path Width="14" Height="14" Data="{StaticResource IconMinus}" Style="{StaticResource Stroke}" />
-                                            </Button>
-                                            <TextBlock x:Name="DeviceCountText" Width="44" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" TextAlignment="Center" />
-                                            <Button x:Name="DevicePlus" Click="DevicePlus_Click" Style="{StaticResource CounterButton}">
-                                                <Path Width="14" Height="14" Data="{StaticResource IconPlus}" Style="{StaticResource Stroke}" />
-                                            </Button>
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <Border Height="1" Margin="0,18,0,0" Background="{StaticResource LineBrush}" />
-
-                                    <TextBlock Margin="0,18,0,12" Style="{StaticResource Body}" FontWeight="Medium" Text="{s:T pricing.method}" />
-                                    <UniformGrid x:Name="MethodList" Columns="3" />
-                                </StackPanel>
-                            </Border>
-
-                            <Border Grid.Column="2" VerticalAlignment="Top" Padding="26" Style="{StaticResource Panel}">
+                        <!-- Nothing is bought in the app, as on iOS and Android: the subscription
+                             is managed in the customer account on app.colitu.com. -->
+                        <Border Margin="0,16,0,0" MaxWidth="720" HorizontalAlignment="Left" Padding="28" Style="{StaticResource Panel}">
+                            <StackPanel>
                                 <Grid>
-                                    <StackPanel x:Name="SummaryPanel">
-                                        <TextBlock Style="{StaticResource Kicker}" Text="{s:T pricing.summary}" />
-                                        <TextBlock x:Name="SummaryTitle" Margin="0,10,0,0" Style="{StaticResource H2}" />
-                                        <Grid Margin="0,18,0,0">
-                                            <TextBlock Style="{StaticResource Small}" Text="{s:T pricing.regular}" />
-                                            <TextBlock x:Name="SummaryRegular" HorizontalAlignment="Right" FontSize="13" />
-                                        </Grid>
-                                        <Grid x:Name="SummaryDiscountRow" Margin="0,10,0,0">
-                                            <TextBlock x:Name="SummaryDiscountLabel" Style="{StaticResource Small}" />
-                                            <TextBlock x:Name="SummaryDiscount" HorizontalAlignment="Right" FontSize="13" Foreground="{StaticResource SuccessBrush}" />
-                                        </Grid>
-                                        <Grid Margin="0,10,0,0">
-                                            <TextBlock x:Name="SummaryFeeLabel" Style="{StaticResource Small}" />
-                                            <TextBlock x:Name="SummaryFee" HorizontalAlignment="Right" FontSize="13" />
-                                        </Grid>
-                                        <Border Height="1" Margin="0,16,0,0" Background="{StaticResource LineBrush}" />
-                                        <Grid Margin="0,14,0,0">
-                                            <TextBlock VerticalAlignment="Center" Style="{StaticResource Kicker}" Text="{s:T pricing.total}" />
-                                            <TextBlock x:Name="SummaryTotal" HorizontalAlignment="Right" FontSize="28" FontWeight="SemiBold" />
-                                        </Grid>
-                                        <Button x:Name="PayButton" Height="52" Margin="0,20,0,0" HorizontalAlignment="Stretch" Click="Pay_Click" Style="{StaticResource PrimaryButton}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <Ellipse x:Name="PaySpinner" Margin="0,0,10,0" Stroke="{StaticResource OnAccentBrush}" Style="{StaticResource Spinner}" Visibility="Collapsed" />
-                                                <TextBlock FontSize="14.5" Text="{s:T pricing.pay}" />
-                                            </StackPanel>
-                                        </Button>
-                                        <StackPanel Margin="0,14,0,0" Orientation="Horizontal">
-                                            <Path Width="13" Height="13" Margin="0,2,8,0" VerticalAlignment="Top" Data="{StaticResource IconLock}" Stretch="Uniform" Stroke="{StaticResource DimBrush}" StrokeThickness="1.6" />
-                                            <TextBlock Width="250" FontSize="12" Foreground="{StaticResource DimBrush}" Text="{s:T pricing.secure}" TextWrapping="Wrap" />
-                                        </StackPanel>
-                                    </StackPanel>
-
-                                    <StackPanel x:Name="PaymentPanel" Visibility="Collapsed">
-                                        <Grid Width="64" Height="64" Margin="0,6,0,0" HorizontalAlignment="Left">
-                                            <Ellipse Fill="{StaticResource IconWellBrush}" Stroke="{StaticResource LineStrongBrush}" />
-                                            <Ellipse x:Name="PaymentSpinner" Width="30" Height="30" Style="{StaticResource Spinner}" />
-                                            <Path x:Name="PaymentResultIcon" Width="26" Height="26" Stretch="Uniform" StrokeEndLineCap="Round" StrokeStartLineCap="Round" StrokeThickness="2.6" Visibility="Collapsed" />
-                                        </Grid>
-                                        <TextBlock x:Name="PaymentTitle" Margin="0,18,0,0" Style="{StaticResource H2}" />
-                                        <TextBlock x:Name="PaymentHint" Margin="0,8,0,0" Style="{StaticResource Muted}" />
-                                        <Button x:Name="PaymentPrimary" Height="48" Margin="0,22,0,0" HorizontalAlignment="Stretch" Click="PaymentPrimary_Click" Style="{StaticResource PrimaryButton}">
-                                            <TextBlock x:Name="PaymentPrimaryText" FontSize="14.5" />
-                                        </Button>
-                                        <Button x:Name="PaymentSecondary" Height="44" Margin="0,10,0,0" HorizontalAlignment="Stretch" Click="PaymentSecondary_Click" Style="{StaticResource SecondaryButton}">
-                                            <TextBlock x:Name="PaymentSecondaryText" FontSize="14" />
-                                        </Button>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Width="48" Height="48" VerticalAlignment="Top">
+                                        <Ellipse Fill="{StaticResource IconWellBrush}" Stroke="{StaticResource LineStrongBrush}" />
+                                        <Path Width="22" Height="22" Data="{StaticResource IconShield}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeThickness="1.8" />
+                                    </Grid>
+                                    <StackPanel Grid.Column="1" Margin="16,2,0,0">
+                                        <TextBlock Style="{StaticResource H2}" Text="{s:T plan.manageTitle}" TextWrapping="Wrap" />
+                                        <TextBlock Margin="0,8,0,0" Style="{StaticResource Muted}" Text="{s:T plan.manageBody}" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Grid>
-                            </Border>
-                        </Grid>
+                                <StackPanel Margin="0,24,0,0" Orientation="Horizontal">
+                                    <Button MinWidth="240" Height="50" Padding="22,0" Click="ManagePlan_Click" Style="{StaticResource PrimaryButton}">
+                                        <TextBlock FontSize="14.5" Text="{s:T plan.manageButton}" />
+                                    </Button>
+                                    <Button x:Name="PlanRefreshButton" MinWidth="180" Height="50" Margin="12,0,0,0" Padding="22,0" Click="PlanRefresh_Click" Style="{StaticResource SecondaryButton}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Ellipse x:Name="PlanRefreshSpinner" Margin="0,0,10,0" Style="{StaticResource Spinner}" Visibility="Collapsed" />
+                                            <TextBlock FontSize="14" Text="{s:T plan.refresh}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                                <StackPanel Margin="0,16,0,0" Orientation="Horizontal">
+                                    <Path Width="13" Height="13" Margin="0,2,8,0" VerticalAlignment="Top" Data="{StaticResource IconLock}" Stretch="Uniform" Stroke="{StaticResource DimBrush}" StrokeThickness="1.6" />
+                                    <TextBlock MaxWidth="600" FontSize="12" Foreground="{StaticResource DimBrush}" Text="{s:T plan.refreshHint}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
 

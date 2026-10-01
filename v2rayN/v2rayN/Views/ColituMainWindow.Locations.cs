@@ -89,7 +89,7 @@ public partial class ColituMainWindow
             {
                 continue;
             }
-            var row = ColituServerRow.From(server);
+            var row = ColituServerRow.From(server, _pings.TryGetValue(server.Id ?? "", out var ping) ? ping : null);
             if (query.Length > 0 && !row.Matches(query))
             {
                 continue;
@@ -120,6 +120,46 @@ public partial class ColituMainWindow
     }
 
     private void ServerSearch_TextChanged(object sender, TextChangedEventArgs e) => RenderServers();
+
+    // ── Pings ───────────────────────────────────────────────────────────────
+    /// <summary>Last measured ping per server id. The panel sends where to measure, not a number.</summary>
+    private readonly Dictionary<string, int> _pings = new(StringComparer.OrdinalIgnoreCase);
+    private DateTimeOffset _pingsMeasuredAt = DateTimeOffset.MinValue;
+    private bool _measuringPings;
+
+    /// <summary>
+    /// Pings every location from this PC, outside the tunnel (see ColituLatency), at most
+    /// every 30 seconds; called when the list loads and whenever the Locations tab opens.
+    /// </summary>
+    private async Task MeasurePingsAsync(bool force = false)
+    {
+        if (_measuringPings || _servers.Count == 0 || (!force && DateTimeOffset.UtcNow - _pingsMeasuredAt < TimeSpan.FromSeconds(30)))
+        {
+            return;
+        }
+        _measuringPings = true;
+        try
+        {
+            var measured = await ColituLatency.MeasureAllAsync(_servers.ToList());
+            _pingsMeasuredAt = DateTimeOffset.UtcNow;
+            foreach (var (id, ms) in measured)
+            {
+                _pings[id] = ms;
+            }
+            if (_page == "locations" && measured.Count > 0)
+            {
+                RenderServers();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.MeasurePingsAsync", ex);
+        }
+        finally
+        {
+            _measuringPings = false;
+        }
+    }
 
     private async void ServerList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -163,7 +203,9 @@ public partial class ColituMainWindow
 /// <summary>One line of the locations list (and the home location card).</summary>
 public sealed class ColituServerRow
 {
-    private static readonly Brush Lit = new SolidColorBrush(Color.FromRgb(0xC4, 0xB5, 0xFD));
+    private static readonly Brush PingGood = new SolidColorBrush(Color.FromRgb(0x5E, 0xE0, 0xA0));
+    private static readonly Brush PingFair = new SolidColorBrush(Color.FromRgb(0xFF, 0xB5, 0x47));
+    private static readonly Brush PingPoor = new SolidColorBrush(Color.FromRgb(0xFF, 0x6B, 0x81));
     private static readonly Brush Unlit = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF));
     // State badges follow ColituBadge: green glass when connected, neutral glass when offline, lavender when picked.
     private static readonly Brush ConnectedBrush = new SolidColorBrush(Color.FromArgb(0x26, 0x5E, 0xE0, 0xA0));
@@ -181,11 +223,26 @@ public sealed class ColituServerRow
     public Visibility FlagVisibility => FlagUri == null ? Visibility.Collapsed : Visibility.Visible;
     public Visibility AutoVisibility => IsAuto ? Visibility.Visible : Visibility.Collapsed;
     public int LoadLevel { get; init; }
-    public Visibility LoadVisibility => LoadLevel > 0 ? Visibility.Visible : Visibility.Collapsed;
-    public string LoadText => Loc.I[LoadLevel switch { 1 => "server.load.low", 2 => "server.load.medium", _ => "server.load.high" }];
-    public Brush LoadBar1 => LoadLevel >= 1 ? Lit : Unlit;
-    public Brush LoadBar2 => LoadLevel >= 2 ? Lit : Unlit;
-    public Brush LoadBar3 => LoadLevel >= 3 ? Lit : Unlit;
+    public string? LoadText => LoadLevel > 0 ? Loc.I[LoadLevel switch { 1 => "server.load.low", 2 => "server.load.medium", _ => "server.load.high" }] : null;
+
+    /// <summary>Ping from this PC in ms, measured outside the tunnel; null until measured.</summary>
+    public int? Ping { get; init; }
+    public Visibility PingVisibility => IsAuto ? Visibility.Collapsed : Visibility.Visible;
+    public string PingText => Ping is > 0 ? $"{Ping} ms" : "— ms";
+    public Brush PingBrush => Ping switch
+    {
+        null => Unlit,
+        <= 80 => PingGood,
+        <= 200 => PingFair,
+        _ => PingPoor
+    };
+    public Brush PingTextBrush => Ping == null ? OfflineText : PingBrush;
+    /// <summary>Signal bars from the ping: three under 80 ms, two under 200 ms, one above.</summary>
+    private int PingLevel => Ping switch { null => 0, <= 80 => 3, <= 200 => 2, _ => 1 };
+    public Brush PingBar1 => PingLevel >= 1 ? PingBrush : Unlit;
+    public Brush PingBar2 => PingLevel >= 2 ? PingBrush : Unlit;
+    public Brush PingBar3 => PingLevel >= 3 ? PingBrush : Unlit;
+    public string? PingToolTip => LoadText;
     public bool IsSelectable => IsAuto || Server?.Available == true;
     public string StateText { get; private set; } = "";
     public Visibility StateVisibility => StateText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -212,7 +269,7 @@ public sealed class ColituServerRow
         Subtitle = Loc.I["server.autoHint"]
     };
 
-    public static ColituServerRow From(ColituVpnServer server)
+    public static ColituServerRow From(ColituVpnServer server, int? ping = null)
     {
         var country = CountryName(server.CountryCode) ?? server.Country;
         var name = FirstNonEmpty(server.DisplayName, server.Name, country, "Colitu");
@@ -226,6 +283,7 @@ public sealed class ColituServerRow
             Title = name,
             Subtitle = string.Join(" · ", details),
             FlagUri = server.HasLocalFlag ? server.FlagResourceUri : null,
+            Ping = ping,
             LoadLevel = server.Load switch
             {
                 null => 0,

@@ -118,7 +118,22 @@ public static class ColituNetwork
     /// other VPN clients are skipped so the core never sends its traffic into
     /// another tunnel, which would loop or die when that tunnel goes down.
     /// </summary>
-    public static string? PhysicalInterfaceName()
+    public static string? PhysicalInterfaceName() => PhysicalInterface()?.Name;
+
+    /// <summary>IPv4 interface index of <see cref="PhysicalInterfaceName"/>, for IP_UNICAST_IF.</summary>
+    public static int? PhysicalInterfaceIndex()
+    {
+        try
+        {
+            return PhysicalInterface()?.GetIPProperties().GetIPv4Properties().Index;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static NetworkInterface? PhysicalInterface()
     {
         try
         {
@@ -133,11 +148,11 @@ public static class ColituNetwork
                 .OrderBy(item => item.metric)
                 .ThenBy(item => item.adapter.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? 1 : 0)
                 .FirstOrDefault();
-            return best.adapter?.Name;
+            return best.adapter;
         }
         catch (Exception ex)
         {
-            Logging.SaveLog("ColituNetwork.PhysicalInterfaceName", ex);
+            Logging.SaveLog("ColituNetwork.PhysicalInterface", ex);
             return null;
         }
     }

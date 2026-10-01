@@ -209,7 +209,6 @@ public partial class ColituMainWindow
         _servers = [];
         _usage = null;
         _planRequired = false;
-        StopPaymentPolling();
         AuthLoginTab.IsChecked = true;
         ShowAuth();
     }
