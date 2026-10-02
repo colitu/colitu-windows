@@ -999,11 +999,13 @@ public sealed class ColituVpnService
         // answer 0.0.0.0 for ad and tracker domains. In TUN mode that already stops the apps; in
         // proxy mode the browser hands the domain to the core, so the core resolves it first
         // (IPIfNonMatch) and the 0.0.0.0 rule in BuildColituRoutingRules drops the connection.
+        // IPIfNonMatch is also what sends a domain the Russian rules do not name out directly
+        // when its address is in Russia (as on iOS and Android).
         _config.SimpleDNSItem ??= new SimpleDNSItem();
         _config.SimpleDNSItem.RemoteDNS = (preferences.AdBlockEnabled && AdBlockAvailable)
             ? string.Join(",", ColituAdBlockDohServers)
             : Global.DomainRemoteDNSAddress.First();
-        _config.RoutingBasicItem.DomainStrategy = (preferences.AdBlockEnabled && AdBlockAvailable) ? Global.IPIfNonMatch : Global.AsIs;
+        _config.RoutingBasicItem.DomainStrategy = Global.IPIfNonMatch;
 
         await ConfigHandler.SaveConfig(_config);
     }
@@ -1063,10 +1065,10 @@ public sealed class ColituVpnService
         }
 
         await ConfigHandler.SetDefaultRouting(_config, routing);
-        LogConnection("Routing profile applied: DNS protection only");
+        LogConnection("Routing profile applied: DNS protection, Russian sites direct");
     }
 
-    private static List<RulesItem> BuildColituRoutingRules(ColituVpnPreferences preferences)
+    internal static List<RulesItem> BuildColituRoutingRules(ColituVpnPreferences preferences)
     {
         preferences = preferences.Normalize();
         var rules = new List<RulesItem>();
@@ -1088,6 +1090,27 @@ public sealed class ColituVpnService
             OutboundTag = Global.BlockTag,
             Ip = ["0.0.0.0/32", "::/128"],
             Enabled = (preferences.AdBlockEnabled && AdBlockAvailable)
+        });
+
+        // Russian sites and apps (banks, Gosuslugi, Wildberries, ...) refuse connections from a
+        // foreign IP ("turn off your VPN"), so they go out directly, as on iOS and Android.
+        // Xray reads these from bin\xray\geo*.dat, sing-box from bin\srss\*.srs.
+        rules.Add(new RulesItem
+        {
+            Id = "colitu-ru-direct-domain",
+            Remarks = "Russian sites direct",
+            OutboundTag = Global.DirectTag,
+            Domain = ["geosite:category-ru"],
+            Enabled = true
+        });
+
+        rules.Add(new RulesItem
+        {
+            Id = "colitu-ru-direct-ip",
+            Remarks = "Russian IPs direct",
+            OutboundTag = Global.DirectTag,
+            Ip = ["geoip:ru"],
+            Enabled = true
         });
 
         return rules;

@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
-    [string]$Version = "2.5.0",
+    [string]$Version = "2.5.1",
     [switch]$SkipPublish,
     # ECDSA P-256 private key (PKCS#8 PEM) that signs latest.json. Keep it off the repository;
     # the app only installs updates whose manifest verifies against the embedded public key.
@@ -114,6 +114,14 @@ New-Item -ItemType Directory -Force -Path $binSingboxDir | Out-Null
 Copy-Item -Path (Join-Path $singboxSourceDir "*") -Destination $binSingboxDir -Recurse -Force -Exclude "README.md"
 Copy-Item -Path (Join-Path $xraySourceDir "wintun.dll") -Destination $binSingboxDir -Force
 Assert-FileExists (Join-Path $binSingboxDir "sing-box.exe") "Published bin\sing_box\sing-box.exe"
+
+# sing-box rule sets for the "Russian sites direct" rules; without them sing-box would try to
+# download them from GitHub, which is blocked in Russia.
+$binSrsDir = Join-Path $publishDir "bin\srss"
+New-Item -ItemType Directory -Force -Path $binSrsDir | Out-Null
+Copy-Item -Path (Join-Path $repoRoot "srss-dosyalari\*.srs") -Destination $binSrsDir -Force
+Assert-FileExists (Join-Path $binSrsDir "geosite-category-ru.srs") "Published bin\srss\geosite-category-ru.srs"
+Assert-FileExists (Join-Path $binSrsDir "geoip-ru.srs") "Published bin\srss\geoip-ru.srs"
 
 $iscc = Find-InnoCompiler
 Write-Host "Using Inno compiler: $iscc" -ForegroundColor Cyan

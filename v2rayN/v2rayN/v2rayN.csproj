@@ -67,6 +67,21 @@
 		<Copy SourceFiles="@(_SingboxFiles)" DestinationFolder="$(OutDir)bin\sing_box\" SkipUnchangedFiles="true" />
 	</Target>
 
+	<!-- sing-box rule sets (Russian sites direct) as bin\srss\ -->
+	<Target Name="CopySrsFiles" AfterTargets="Build">
+		<ItemGroup>
+			<_SrsFiles Include="$(MSBuildThisFileDirectory)..\..\srss-dosyalari\*.srs" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_SrsFiles)" DestinationFolder="$(OutDir)bin\srss\" SkipUnchangedFiles="true" />
+	</Target>
+
+	<Target Name="CopySrsFilesToPublish" AfterTargets="Publish">
+		<ItemGroup>
+			<_SrsPublishFiles Include="$(MSBuildThisFileDirectory)..\..\srss-dosyalari\*.srs" />
+		</ItemGroup>
+		<Copy SourceFiles="@(_SrsPublishFiles)" DestinationFolder="$(PublishDir)bin\srss\" SkipUnchangedFiles="true" />
+	</Target>
+
 	<Target Name="CopySingboxFilesToPublish" AfterTargets="Publish">
 		<ItemGroup>
 			<_SingboxPublishFiles Include="$(MSBuildThisFileDirectory)..\..\singbox-dosyalari\**\*" Exclude="$(MSBuildThisFileDirectory)..\..\singbox-dosyalari\README.md" />
