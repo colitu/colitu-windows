@@ -35,6 +35,28 @@ public class ColituRuDirectTests
         }
     }
 
+    [Theory]
+    [InlineData("RU")]
+    [InlineData("ru")]
+    public void RussianServer_KeepsRussianSitesInTheTunnel(string country)
+    {
+        var rules = ColituVpnService.BuildColituRoutingRules(new ColituVpnPreferences(), country);
+
+        rules.Single(r => r.Id == "colitu-ru-direct-domain").Enabled.Should().BeFalse();
+        rules.Single(r => r.Id == "colitu-ru-direct-ip").Enabled.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("DE")]
+    [InlineData(null)]
+    public void OtherServers_SendRussianSitesDirect(string? country)
+    {
+        var rules = ColituVpnService.BuildColituRoutingRules(new ColituVpnPreferences(), country);
+
+        rules.Single(r => r.Id == "colitu-ru-direct-domain").Enabled.Should().BeTrue();
+        rules.Single(r => r.Id == "colitu-ru-direct-ip").Enabled.Should().BeTrue();
+    }
+
     [Fact]
     public void RuleSetFilesShipWithTheApp()
     {

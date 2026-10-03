@@ -168,7 +168,7 @@ public sealed class ColituVpnService
 
             var connected = FindServer(config.ServerId) ?? config.Server ?? server;
             var profiles = await ImportConfigAsync(config, connected);
-            await PrepareConnectionModeAsync();
+            await PrepareConnectionModeAsync(config.Server?.CountryCode ?? connected?.CountryCode);
             try
             {
                 await StartFirstWorkingProfileAsync(profiles, config, connected, token);
@@ -1007,12 +1007,12 @@ public sealed class ColituVpnService
         }
     }
 
-    private async Task PrepareConnectionModeAsync()
+    private async Task PrepareConnectionModeAsync(string? serverCountry)
     {
         EnsureAdministratorForVpn();
         var preferences = _session.Preferences.Normalize();
         await ApplyRuntimePreferencesAsync(preferences);
-        await EnsureColituRoutingAsync(preferences);
+        await EnsureColituRoutingAsync(preferences, serverCountry);
 
         if (!_config.TunModeItem.EnableTun && _config.SystemProxyItem.SysProxyType != ESysProxyType.ForcedChange)
         {
@@ -1080,14 +1080,14 @@ public sealed class ColituVpnService
         !string.IsNullOrWhiteSpace(host)
         && ColituAdBlockDohServers.Any(url => string.Equals(new Uri(url).Host, host.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    private async Task EnsureColituRoutingAsync(ColituVpnPreferences preferences)
+    private async Task EnsureColituRoutingAsync(ColituVpnPreferences preferences, string? serverCountry)
     {
         preferences = preferences.Normalize();
         await ConfigHandler.InitBuiltinRouting(_config);
         var items = await AppManager.Instance.RoutingItems() ?? [];
         var activeRouting = items.FirstOrDefault(item => item.IsActive);
         var routing = items.FirstOrDefault(item => string.Equals(item.Remarks, ColituRoutingRemarks, StringComparison.OrdinalIgnoreCase));
-        var rules = BuildColituRoutingRules(preferences);
+        var rules = BuildColituRoutingRules(preferences, serverCountry);
 
         routing ??= new RoutingItem
         {
@@ -1113,11 +1113,21 @@ public sealed class ColituVpnService
         }
 
         await ConfigHandler.SetDefaultRouting(_config, routing);
-        LogConnection("Routing profile applied: DNS protection, Russian sites direct");
+        LogConnection(RussianSitesDirect(serverCountry)
+            ? "Routing profile applied: DNS protection, Russian sites direct"
+            : "Routing profile applied: DNS protection, Russian sites through the Russian server");
     }
 
-    internal static List<RulesItem> BuildColituRoutingRules(ColituVpnPreferences preferences)
+    /// <summary>
+    /// Russian sites skip the tunnel unless the server itself is in Russia: someone abroad who
+    /// picks the Moscow server wants exactly those sites to see a Russian address.
+    /// </summary>
+    internal static bool RussianSitesDirect(string? serverCountry) =>
+        !string.Equals(serverCountry?.Trim(), "RU", StringComparison.OrdinalIgnoreCase);
+
+    internal static List<RulesItem> BuildColituRoutingRules(ColituVpnPreferences preferences, string? serverCountry = null)
     {
+        var ruDirect = RussianSitesDirect(serverCountry);
         preferences = preferences.Normalize();
         var rules = new List<RulesItem>();
 
@@ -1141,7 +1151,8 @@ public sealed class ColituVpnService
         });
 
         // Russian sites and apps (banks, Gosuslugi, Wildberries, ...) refuse connections from a
-        // foreign IP ("turn off your VPN"), so they go out directly, as on iOS and Android.
+        // foreign IP ("turn off your VPN"), so they go out directly, as on iOS and Android; through
+        // a Russian server they already arrive from a Russian address and stay in the tunnel.
         // Xray reads these from bin\xray\geo*.dat (XRAY_LOCATION_ASSET, CoreInfoManager), sing-box
         // from bin\srss\*.srs.
         rules.Add(new RulesItem
@@ -1150,7 +1161,7 @@ public sealed class ColituVpnService
             Remarks = "Russian sites direct",
             OutboundTag = Global.DirectTag,
             Domain = ["geosite:category-ru"],
-            Enabled = true
+            Enabled = ruDirect
         });
 
         rules.Add(new RulesItem
@@ -1159,7 +1170,7 @@ public sealed class ColituVpnService
             Remarks = "Russian IPs direct",
             OutboundTag = Global.DirectTag,
             Ip = ["geoip:ru"],
-            Enabled = true
+            Enabled = ruDirect
         });
 
         return rules;
