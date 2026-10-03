@@ -16,8 +16,8 @@ public partial class CoreConfigSingboxService
             GenDnsServers();
             GenDnsRules();
 
+            // No independent_cache: sing-box 1.14 deprecates it ("remove the field") and 1.16 rejects it.
             _coreConfig.dns ??= new Dns4Sbox();
-            _coreConfig.dns.independent_cache = true;
 
             // final dns
             var routing = context.RoutingItem;

@@ -149,7 +149,7 @@
             <Rectangle Fill="{StaticResource HexDotsBrush}" OpacityMask="{StaticResource HexDotsFade}" />
         </Grid>
 
-        <tb:TaskbarIcon x:Name="TrayIcon" IconSource="/Resources/colitu.ico" ToolTipText="Colitu VPN" Visibility="Visible">
+        <tb:TaskbarIcon x:Name="TrayIcon" IconSource="/Resources/colitu-tray.ico" ToolTipText="Colitu VPN" Visibility="Visible">
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu>
                     <MenuItem Click="TrayOpen_Click" FontWeight="SemiBold" Header="{s:T tray.open}" />

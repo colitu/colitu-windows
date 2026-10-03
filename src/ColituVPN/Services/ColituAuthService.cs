@@ -31,7 +31,7 @@ public sealed class ColituAuthService
     private static readonly string[] SupportedProtocols = ["hysteria2", "vless-reality", "vless-xhttp", "trojan", "shadowsocks"];
 
     // Direct to the panel: while the tunnel restarts the system proxy still points at the stopped core.
-    private readonly HttpClient _httpClient = new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(20) };
+    private HttpClient _httpClient = CreateHttpClient();
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private readonly SemaphoreSlim _deviceLock = new(1, 1);
@@ -252,9 +252,29 @@ public sealed class ColituAuthService
         };
     }
 
-    public async Task<T?> GetAuthorizedJsonAsync<T>(string path)
+    private static HttpClient CreateHttpClient() => new(new SocketsHttpHandler
     {
-        using var response = await SendAuthorizedAsync(() => new HttpRequestMessage(HttpMethod.Get, BuildUri(path)));
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(8),
+        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
+    })
+    { Timeout = TimeSpan.FromSeconds(20) };
+
+    /// <summary>
+    /// The tunnel just came up or went down. Keep-alive connections opened over the old route
+    /// (through the TUN adapter, or around it) are dead now, and reusing one hangs until the
+    /// 20 s timeout: start the next requests on fresh connections.
+    /// </summary>
+    public void ResetConnections()
+    {
+        var old = Interlocked.Exchange(ref _httpClient, CreateHttpClient());
+        // Requests already in flight keep the old client; dispose it once they are done.
+        _ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => old.Dispose(), TaskScheduler.Default);
+    }
+
+    public async Task<T?> GetAuthorizedJsonAsync<T>(string path, CancellationToken token = default)
+    {
+        using var response = await SendAuthorizedAsync(() => new HttpRequestMessage(HttpMethod.Get, BuildUri(path)), token: token);
         await EnsureSuccessAsync(response);
         return await ReadJsonAsync<T>(response);
     }
@@ -266,9 +286,9 @@ public sealed class ColituAuthService
         return await ReadJsonAsync<T>(response);
     }
 
-    public async Task<T?> PutAuthorizedJsonAsync<T>(string path, object body)
+    public async Task<T?> PutAuthorizedJsonAsync<T>(string path, object body, CancellationToken token = default)
     {
-        using var response = await SendAuthorizedAsync(() => JsonRequest(HttpMethod.Put, path, body));
+        using var response = await SendAuthorizedAsync(() => JsonRequest(HttpMethod.Put, path, body), token: token);
         await EnsureSuccessAsync(response);
         return await ReadJsonAsync<T>(response);
     }
@@ -497,7 +517,7 @@ public sealed class ColituAuthService
         };
     }
 
-    private async Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory, bool allowRefresh = true, bool includeDevice = true)
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory, bool allowRefresh = true, bool includeDevice = true, CancellationToken token = default)
     {
         // Refresh proactively just before the access token expires so that
         // parallel requests do not all hit 401 and race each other to refresh.
@@ -508,7 +528,7 @@ public sealed class ColituAuthService
 
         var tokenUsed = _accessToken;
         var request = PrepareAuthorized(requestFactory(), tokenUsed, includeDevice);
-        var response = await _httpClient.SendAsync(request);
+        var response = await _httpClient.SendAsync(request, token);
         if (response.StatusCode != HttpStatusCode.Unauthorized || !allowRefresh)
         {
             return response;
@@ -529,7 +549,7 @@ public sealed class ColituAuthService
                 "REFRESH_FAILED");
         }
 
-        return await _httpClient.SendAsync(PrepareAuthorized(requestFactory(), _accessToken, includeDevice));
+        return await _httpClient.SendAsync(PrepareAuthorized(requestFactory(), _accessToken, includeDevice), token);
     }
 
     private HttpRequestMessage PrepareAuthorized(HttpRequestMessage request, string? token, bool includeDevice)

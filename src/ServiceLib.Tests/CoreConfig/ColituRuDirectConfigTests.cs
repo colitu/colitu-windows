@@ -1,6 +1,7 @@
 using AwesomeAssertions;
 using ServiceLib.Common;
 using ServiceLib.Enums;
+using ServiceLib.Manager;
 using ServiceLib.Models;
 using ServiceLib.Services.CoreConfig;
 using Xunit;
@@ -71,6 +72,17 @@ public class ColituRuDirectConfigTests
         cfg.routing.rules.Should().Contain(r => r.domain != null && r.domain.Contains("geosite:category-ru") && r.outboundTag == Global.DirectTag);
         cfg.routing.rules.Should().Contain(r => r.ip != null && r.ip.Contains("geoip:ru") && r.outboundTag == Global.DirectTag);
         cfg.outbounds.Should().Contain(o => o.tag == Global.DirectTag);
+    }
+
+    [Fact]
+    public void Xray_LooksForGeoFilesNextToItsExecutable()
+    {
+        // The installer puts geoip.dat/geosite.dat in bin\xray beside xray.exe. Windows 2.5.1 pointed
+        // XRAY_LOCATION_ASSET at bin\, so every Xray transport failed with "failed to open geosite.dat".
+        var xray = CoreInfoManager.Instance.GetCoreInfo(ECoreType.Xray)!;
+        var exeDir = Path.GetDirectoryName(Utils.GetBinPath("xray.exe", ECoreType.Xray.ToString()));
+
+        Path.GetFullPath(xray.Environment[Global.XrayLocalAsset]!).Should().Be(Path.GetFullPath(exeDir!));
     }
 
     [Fact]

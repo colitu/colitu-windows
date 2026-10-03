@@ -40,6 +40,8 @@
 		<Resource Include="Resources\NotifyIcon3.ico" />
 		<Resource Include="Resources\NotifyIcon4.ico" />
 		<Resource Include="Resources\colitu.ico" />
+		<!-- Tray only: the mark cropped to the edges so it fills the 16-32 px notification-area slot. -->
+		<Resource Include="Resources\colitu-tray.ico" />
 		<Resource Include="Resources\colitu-icon.png" />
 		<Resource Include="Resources\mark.png" />
 		<Resource Include="Resources\grain.png" />

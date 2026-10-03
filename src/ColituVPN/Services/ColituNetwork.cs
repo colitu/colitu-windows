@@ -13,7 +13,7 @@ namespace v2rayN.Services;
 /// </summary>
 public static class ColituNetwork
 {
-    private static readonly HttpClient Doh = new(new SocketsHttpHandler { UseProxy = false, ConnectTimeout = TimeSpan.FromSeconds(4) }) { Timeout = TimeSpan.FromSeconds(5) };
+    private static HttpClient Doh = CreateDohClient();
     private static readonly Dictionary<string, (IPAddress Address, DateTimeOffset Until)> ResolveCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object CacheGate = new();
 
@@ -50,39 +50,79 @@ public static class ColituNetwork
         return resolved;
     }
 
+    private static HttpClient CreateDohClient() => new(new SocketsHttpHandler
+    {
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(4),
+        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
+    })
+    { Timeout = TimeSpan.FromSeconds(5) };
+
+    /// <summary>Drops keep-alive DoH connections opened over a route that changed with the tunnel.</summary>
+    public static void ResetConnections()
+    {
+        var old = Interlocked.Exchange(ref Doh, CreateDohClient());
+        _ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => old.Dispose(), TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// Asks both resolvers at once and takes the first real answer: one of them is often slow or
+    /// blocked (Russia), and asking them in turn cost up to 5 s before the second was even tried.
+    /// </summary>
     private static async Task<IPAddress?> ResolveViaDohAsync(string host, CancellationToken token)
     {
-        foreach (var endpoint in new[] { "https://cloudflare-dns.com/dns-query", "https://dns.google/resolve" })
+        using var race = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var client = Doh;
+        var pending = new[] { "https://cloudflare-dns.com/dns-query", "https://dns.google/resolve" }
+            .Select(endpoint => QueryDohAsync(client, endpoint, host, race.Token))
+            .ToList();
+        while (pending.Count > 0)
         {
-            try
+            var finished = await Task.WhenAny(pending);
+            pending.Remove(finished);
+            if (await finished is { } address)
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"{endpoint}?name={Uri.EscapeDataString(host)}&type=A");
-                request.Headers.TryAddWithoutValidation("accept", "application/dns-json");
-                using var response = await Doh.SendAsync(request, token);
-                if (!response.IsSuccessStatusCode)
+                race.Cancel();
+                return address;
+            }
+        }
+        return null;
+    }
+
+    private static async Task<IPAddress?> QueryDohAsync(HttpClient client, string endpoint, string host, CancellationToken token)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{endpoint}?name={Uri.EscapeDataString(host)}&type=A");
+            request.Headers.TryAddWithoutValidation("accept", "application/dns-json");
+            using var response = await client.SendAsync(request, token);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
+            if (!document.RootElement.TryGetProperty("Answer", out var answers))
+            {
+                return null;
+            }
+            foreach (var answer in answers.EnumerateArray())
+            {
+                if (answer.TryGetProperty("type", out var type) && type.GetInt32() == 1
+                    && answer.TryGetProperty("data", out var data)
+                    && IPAddress.TryParse(data.GetString(), out var address)
+                    && !IsPlaceholder(address))
                 {
-                    continue;
-                }
-                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
-                if (!document.RootElement.TryGetProperty("Answer", out var answers))
-                {
-                    continue;
-                }
-                foreach (var answer in answers.EnumerateArray())
-                {
-                    if (answer.TryGetProperty("type", out var type) && type.GetInt32() == 1
-                        && answer.TryGetProperty("data", out var data)
-                        && IPAddress.TryParse(data.GetString(), out var address)
-                        && !IsPlaceholder(address))
-                    {
-                        return address;
-                    }
+                    return address;
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
-            {
-                Logging.SaveLog($"ColituNetwork.ResolveViaDoh {endpoint}: {ex.Message}");
-            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
+        {
+            Logging.SaveLog($"ColituNetwork.ResolveViaDoh {endpoint}: {ex.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+            // The other resolver answered first, or the connection attempt was cancelled.
         }
         return null;
     }

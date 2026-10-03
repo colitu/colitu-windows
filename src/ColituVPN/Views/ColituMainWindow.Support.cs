@@ -103,6 +103,11 @@ public partial class ColituMainWindow
             // Support switched off in the panel: hide the launcher until it returns.
             SupportLauncher.Visibility = Visibility.Collapsed;
         }
+        catch (Exception ex) when (ColituVpnService.IsNetworkFailure(ex))
+        {
+            // A background badge poll while the tunnel restarts or the network drops; the next
+            // poll (45 s) tries again. Not worth a stack trace in the log.
+        }
         catch (Exception ex)
         {
             Logging.SaveLog("ColituMainWindow.CheckSupportUnreadAsync", ex);

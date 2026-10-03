@@ -6,7 +6,7 @@
 #if GetEnv("COLITU_APP_VERSION") != ""
   #define MyAppVersion GetEnv("COLITU_APP_VERSION")
 #else
-  #define MyAppVersion "2.4.1"
+  #define MyAppVersion "2.5.2"
 #endif
 
 #if GetEnv("COLITU_PUBLISH_DIR") != ""

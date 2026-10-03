@@ -138,6 +138,23 @@ public class ColituSecurityTests
         ColituLogPrivacy.SanitizeCoreLine(line).Should().Be(line);
     }
 
+    [Theory]
+    [InlineData("+0300 2026-10-02 00:00:38 ERROR [3351765230 17m3s] connection: connection download closed: close tcp 172.19.0.1:58466->1.2.3.4:443: endpoint not connected")]
+    [InlineData("+0300 2026-10-02 00:04:33 ERROR [4276258550 6m7s] connection: connection upload closed: stream 8628 canceled by remote with error code 0")]
+    [InlineData("+0300 2026-10-02 02:33:11 ERROR [1342569061 10.6s] connection: connection download closed: remote error: dial tcp4 1.2.3.4:443: i/o timeout")]
+    public void LogPrivacy_DropsRoutineConnectionCloses(string line)
+    {
+        ColituLogPrivacy.SanitizeCoreLine(line).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("+0300 2026-10-03 14:44:42 ERROR [3542861300 189ms] connection: open connection to 1.2.3.4:443 using outbound/hysteria2[proxy]: authentication failed, status code: 404")]
+    [InlineData("+0300 2026-10-02 17:17:28 ERROR [1503109085 2m7s] connection: report handshake success: connection timed out")]
+    public void LogPrivacy_KeepsErrorsAboutTheTunnel(string line)
+    {
+        ColituLogPrivacy.SanitizeCoreLine(line).Should().NotBeNull();
+    }
+
     [Fact]
     public void Redact_RemovesBrowsingFromSupportLogs()
     {

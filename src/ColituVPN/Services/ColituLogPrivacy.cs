@@ -18,7 +18,7 @@ public static partial class ColituLogPrivacy
     /// </summary>
     public static string? SanitizeCoreLine(string line, IReadOnlyCollection<string>? keepHosts = null)
     {
-        if (string.IsNullOrWhiteSpace(line) || IsTrafficLine(line))
+        if (string.IsNullOrWhiteSpace(line) || IsTrafficLine(line) || IsRoutineClose(line))
         {
             return null;
         }
@@ -41,7 +41,7 @@ public static partial class ColituLogPrivacy
                 continue;
             }
             var core = line[(start + 2)..];
-            if (IsTrafficLine(core))
+            if (IsTrafficLine(core) || IsRoutineClose(core))
             {
                 continue;
             }
@@ -53,6 +53,16 @@ public static partial class ColituLogPrivacy
     internal static bool IsTrafficLine(string line)
     {
         return TrafficLine().IsMatch(line);
+    }
+
+    /// <summary>
+    /// sing-box reports every closed connection as an error: a page closing its socket, the remote
+    /// end hanging up, a site the server cannot reach. Hundreds a day, nothing about the tunnel,
+    /// and they buried the lines that matter.
+    /// </summary>
+    internal static bool IsRoutineClose(string line)
+    {
+        return RoutineClose().IsMatch(line);
     }
 
     internal static string MaskHosts(string line, IReadOnlyCollection<string>? keepHosts)
@@ -77,6 +87,9 @@ public static partial class ColituLogPrivacy
     // Xray access lines look like "from 127.0.0.1:5000 accepted tcp:host:443" or "accepted //host:443 [socks >> proxy]".
     [GeneratedRegex(@"\baccepted\s|\bsniffed\b|\[(Info|Debug)\]|(^|\s)(INFO|DEBUG|TRACE)\s")]
     private static partial Regex TrafficLine();
+
+    [GeneratedRegex(@"connection: connection (?:upload|download) closed: .*(?:endpoint not connected|canceled by remote with error code 0|use of closed network connection|connection reset by peer|forcibly closed|broken pipe|\bEOF\b|remote error: dial tcp[46]? .*(?:i/o timeout|network is unreachable|connection refused))")]
+    private static partial Regex RoutineClose();
 
     [GeneratedRegex(@"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b")]
     private static partial Regex Ipv4();

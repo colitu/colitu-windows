@@ -119,7 +119,9 @@ public sealed class CoreInfoManager
                     VersionArg = "-version",
                     Environment = new Dictionary<string, string?>()
                     {
-                        { Global.XrayLocalAsset, Utils.GetBinPath("") },
+                        // Colitu ships geoip.dat/geosite.dat next to xray.exe (bin\xray); with the
+                        // asset path at bin\ every geosite:/geoip: rule made Xray refuse to start.
+                        { Global.XrayLocalAsset, Utils.GetBinPath("", ECoreType.Xray.ToString()) },
                         { Global.XrayLocalCert, Utils.GetBinPath("") },
                     },
                 },

@@ -87,7 +87,7 @@ public sealed class ColituApiClient
     /// Stores the chosen location as this device's preferred node; an empty id
     /// lets the panel pick the recommended node ("best server").
     /// </summary>
-    public async Task SetPreferredServerAsync(string? nodeId)
+    public async Task SetPreferredServerAsync(string? nodeId, CancellationToken token = default)
     {
         await ColituAuthService.Instance.PutAuthorizedJsonAsync<JsonElement>("/me/preferences", new
         {
@@ -95,16 +95,16 @@ public sealed class ColituApiClient
             preferred_country = "",
             preferred_protocol = "auto",
             preferred_node_id = nodeId ?? ""
-        });
+        }, token);
     }
 
     /// <summary>
     /// Fetches the device-bound configuration envelope and converts every
     /// candidate transport into a share link that v2rayN's importer understands.
     /// </summary>
-    public async Task<ColituVpnConfigResponse?> GetConfigAsync(ColituVpnServer? server)
+    public async Task<ColituVpnConfigResponse?> GetConfigAsync(ColituVpnServer? server, CancellationToken token = default)
     {
-        var envelope = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituConfigEnvelopeDto>("/config?protocol=auto");
+        var envelope = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituConfigEnvelopeDto>("/config?protocol=auto", token);
         if (envelope?.Profile == null)
         {
             return null;
@@ -118,7 +118,7 @@ public sealed class ColituApiClient
 
         var nodeId = envelope.Server?.Id ?? server?.Id;
         var candidates = new List<ColituConfigCandidate>();
-        var pinned = await PinServerAddressesAsync(new[] { envelope.Profile }.Concat((envelope.Candidates ?? []).Select(item => item.Profile)));
+        var pinned = await PinServerAddressesAsync(new[] { envelope.Profile }.Concat((envelope.Candidates ?? []).Select(item => item.Profile)), token);
         void Add(string? protocol, ColituConfigProfileDto? profile)
         {
             if (profile == null || !string.Equals(profile.Format, MobileProfileFormat, StringComparison.OrdinalIgnoreCase))
@@ -178,7 +178,7 @@ public sealed class ColituApiClient
     /// otherwise ask the system resolver, which another VPN client in fake-IP
     /// mode answers with a placeholder that leads nowhere on the physical adapter.
     /// </summary>
-    private static async Task<Dictionary<string, string>> PinServerAddressesAsync(IEnumerable<ColituConfigProfileDto?> profiles)
+    private static async Task<Dictionary<string, string>> PinServerAddressesAsync(IEnumerable<ColituConfigProfileDto?> profiles, CancellationToken token)
     {
         var pinned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var host in profiles.Select(profile => profile == null ? null : ColituShareLinkBuilder.HostOf(profile.Payload)).Where(host => host != null).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -187,7 +187,7 @@ public sealed class ColituApiClient
             {
                 continue;
             }
-            var address = await ColituNetwork.ResolveServerAsync(host!);
+            var address = await ColituNetwork.ResolveServerAsync(host!, token);
             if (address != null)
             {
                 pinned[host!] = address.ToString();
