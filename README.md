@@ -15,7 +15,7 @@ system proxy, TUN adapter, routing and DNS.
 | | |
 |---|---|
 | App | `Colitu VPN` (`ColituVPN.exe`), WPF on .NET 8 |
-| Version | `2.5.2` (`src/Directory.Build.props`) |
+| Version | `2.5.3` (`src/Directory.Build.props`) |
 | OS | Windows 10 / 11, x64 |
 | Languages | Russian, English, Turkish |
 | Website | <https://colitu.com> · [downloads](https://colitu.com/downloads/windows) |
