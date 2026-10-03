@@ -1,0 +1,19 @@
+Colitu VPN for Windows
+Copyright (C) Colitu
+
+This program is free software, distributed under the GNU General Public
+License v3.0 (see LICENSE).
+
+It contains code from the following open-source projects. The parts taken
+from them have been modified by Colitu since May 2026.
+
+  v2rayN          https://github.com/2dust/v2rayN          GPL-3.0
+                  Copyright (C) 2019-Present 2dust
+                  (core layer in src/ServiceLib, src/AmazTool and parts of src/ColituVPN)
+
+The release packages also ship these programs, each under its own license
+(see xray-dosyalari/ and singbox-dosyalari/):
+
+  Xray-core       https://github.com/XTLS/Xray-core        MPL-2.0
+  sing-box        https://github.com/SagerNet/sing-box     GPL-3.0
+  Wintun          https://www.wintun.net/                  Wintun license

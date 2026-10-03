@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.5.11709.299 stable
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "v2rayN", "v2rayN\v2rayN.csproj", "{6DE127CA-1763-4236-B297-D2EF9CB2EC9B}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ColituVPN", "ColituVPN\ColituVPN.csproj", "{6DE127CA-1763-4236-B297-D2EF9CB2EC9B}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ServiceLib", "ServiceLib\ServiceLib.csproj", "{1B6456C4-FFAA-4298-80F6-7B689A6E9243}"
 EndProject
@@ -24,7 +24,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ServiceLib.Tests", "Service
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ServiceLib.UdpTest", "ServiceLib.UdpTest\ServiceLib.UdpTest.csproj", "{CE9D9298-0289-4718-2522-B236489F2912}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "v2rayN.Tests", "v2rayN.Tests\v2rayN.Tests.csproj", "{2217D0B2-A3B2-41F4-A8B1-98C1937FAFA1}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ColituVPN.Tests", "ColituVPN.Tests\ColituVPN.Tests.csproj", "{2217D0B2-A3B2-41F4-A8B1-98C1937FAFA1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

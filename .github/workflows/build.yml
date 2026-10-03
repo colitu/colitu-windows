@@ -23,20 +23,20 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Restore
-        working-directory: ./v2rayN
-        run: dotnet restore ./v2rayN/v2rayN.csproj && dotnet restore ./ServiceLib.Tests/ServiceLib.Tests.csproj
+        working-directory: ./src
+        run: dotnet restore ./ColituVPN/ColituVPN.csproj && dotnet restore ./ServiceLib.Tests/ServiceLib.Tests.csproj
 
       - name: Build Colitu VPN
-        working-directory: ./v2rayN
-        run: dotnet build ./v2rayN/v2rayN.csproj -c Release --no-restore
+        working-directory: ./src
+        run: dotnet build ./ColituVPN/ColituVPN.csproj -c Release --no-restore
 
       - name: Test
-        working-directory: ./v2rayN
+        working-directory: ./src
         run: dotnet test ./ServiceLib.Tests/ServiceLib.Tests.csproj -c Release --no-restore
 
       - name: Publish
-        working-directory: ./v2rayN
-        run: dotnet publish ./v2rayN/v2rayN.csproj -c Release -r win-x64 -p:SelfContained=true -o ${{ github.workspace }}/publish
+        working-directory: ./src
+        run: dotnet publish ./ColituVPN/ColituVPN.csproj -c Release -r win-x64 -p:SelfContained=true -o ${{ github.workspace }}/publish
 
       - name: Upload build
         uses: actions/upload-artifact@v7.0.1

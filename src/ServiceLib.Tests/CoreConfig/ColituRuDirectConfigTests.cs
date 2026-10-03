@@ -9,7 +9,7 @@ namespace ServiceLib.Tests.CoreConfig;
 
 /// <summary>
 /// Colitu sends Russian domains (geosite:category-ru) and Russian IPs (geoip:ru) out directly
-/// (v2rayN/Services/ColituVpnService.cs, BuildColituRoutingRules) with IPIfNonMatch routing.
+/// (ColituVPN/Services/ColituVpnService.cs, BuildColituRoutingRules) with IPIfNonMatch routing.
 /// These tests pin down that both cores turn those rules into direct routes.
 /// </summary>
 public class ColituRuDirectConfigTests

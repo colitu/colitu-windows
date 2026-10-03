@@ -7,4 +7,4 @@
                                               // app, or any theme specific resource dictionaries)
 )]
 
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("v2rayN.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("ColituVPN.Tests")]

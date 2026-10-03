@@ -8,7 +8,7 @@ using Xunit;
 namespace ServiceLib.Tests.CoreConfig;
 
 /// <summary>
-/// Colitu's ad blocking (v2rayN/Services/ColituVpnService.cs) sets the remote DNS to its
+/// Colitu's ad blocking (ColituVPN/Services/ColituVpnService.cs) sets the remote DNS to its
 /// AdGuard Home DoH servers, switches routing to IPIfNonMatch and adds a 0.0.0.0 -> block rule.
 /// These tests pin down that both cores turn those settings into a working config.
 /// </summary>

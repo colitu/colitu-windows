@@ -10,6 +10,6 @@
   <Project Path="ServiceLib.Tests/ServiceLib.Tests.csproj" />
   <Project Path="ServiceLib.UdpTest/ServiceLib.UdpTest.csproj" Id="77930428-4dc4-4130-9031-6b9e714f5d20" />
   <Project Path="ServiceLib/ServiceLib.csproj" />
-  <Project Path="v2rayN/v2rayN.csproj" />
-  <Project Path="v2rayN.Tests/v2rayN.Tests.csproj" />
+  <Project Path="ColituVPN/ColituVPN.csproj" />
+  <Project Path="ColituVPN.Tests/ColituVPN.Tests.csproj" />
 </Solution>

@@ -2,15 +2,15 @@
 
 **English** · [Русский](README.ru.md)
 
-The open-source Windows desktop client of [Colitu VPN](https://colitu.com). It
-keeps the core management, system proxy, TUN, routing and DNS layers of
-[v2rayN](https://github.com/2dust/v2rayN) and puts a single Colitu window on
-top that handles the account, servers and connection through the Colitu API.
+The open-source Windows desktop client of [Colitu VPN](https://colitu.com). A
+single native window handles the account, locations and connection through the
+Colitu API; underneath, a core layer runs Xray and sing-box and manages the
+system proxy, TUN adapter, routing and DNS.
 
 | | |
 |---|---|
 | App | `Colitu VPN` (`ColituVPN.exe`), WPF on .NET 8 |
-| Version | `2.4.1` (`v2rayN/Directory.Build.props`) |
+| Version | `2.5.1` (`src/Directory.Build.props`) |
 | OS | Windows 10 / 11, x64 |
 | Languages | Russian, English, Turkish |
 | Website | <https://colitu.com> · [downloads](https://colitu.com/downloads/windows) |
@@ -55,7 +55,7 @@ top that handles the account, servers and connection through the Colitu API.
 4. Picking a location calls `PUT /me/preferences`, then `GET /config?protocol=auto`
    returns the primary profile and alternatives.
 5. The profiles are converted to `vless://`, `trojan://`, `ss://` and
-   `hysteria2://` links, imported into the v2rayN core layer and tried in order.
+   `hysteria2://` links, imported into the core layer (`src/ServiceLib`) and tried in order.
 6. The outcome is sent to `POST /client/protocol-observations`.
 
 The app never computes prices, eligibility or device limits itself; the server
@@ -64,13 +64,15 @@ is always the source of truth.
 ## Project layout
 
 ```
-v2rayN/
-  v2rayN/                 WPF app (assembly ColituVPN)
+src/
+  ColituVPN/              WPF app (ColituVPN.exe)
     Services/Colitu*.cs   API client, auth, VPN, kill switch, billing, support, updates, localization
     Views/ColituMainWindow*   the Colitu shell, one partial file per page
     Styles/               Colitu theme and brand resources
-  ServiceLib/             v2rayN core, config generation, routing, DNS
+  ServiceLib/             core layer: config generation, routing, DNS, core processes
+  AmazTool/               helper that swaps files during an update
   *.Tests/                unit tests (xUnit)
+  ColituVPN.sln
 xray-dosyalari/           Xray runtime files for the installer (xray.exe is not in git)
 singbox-dosyalari/        sing-box runtime files for Hysteria2 (sing-box.exe is not in git)
 installer/ColituVPN.iss   Inno Setup script
@@ -85,9 +87,9 @@ Requirements: Windows, the .NET 8 SDK with Windows Desktop, and
 
 ```powershell
 git clone https://github.com/cyberlexs/colitu-windows.git
-cd colitu-windows\v2rayN
-dotnet build v2rayN.sln -c Release
-dotnet test v2rayN.sln -c Release
+cd colitu-windows\src
+dotnet build ColituVPN.sln -c Release
+dotnet test ColituVPN.sln -c Release
 ```
 
 ### Installer
@@ -104,7 +106,7 @@ from the official releases and check their hashes:
 Then run:
 
 ```powershell
-pwsh .\scripts\build-installer.ps1 -Version 2.4.1
+pwsh .\scripts\build-installer.ps1 -Version 2.5.1
 ```
 
 The output in `artifacts/installer/` is `ColituVPN-Setup-<version>-x64.exe`, a
@@ -129,20 +131,13 @@ debug builds also read the `COLITU_API_BASE_URL` environment variable):
 If you find a vulnerability, please do not open a public issue. Write to
 **support@colitu.com** with the details and we will get back to you.
 
-## Credits
-
-Colitu for Windows is built on the work of these projects:
-
-- [v2rayN](https://github.com/2dust/v2rayN) (GPL-3.0): the app this client is forked from
-- [Xray-core](https://github.com/XTLS/Xray-core) (MPL-2.0)
-- [sing-box](https://github.com/SagerNet/sing-box) (GPL-3.0)
-- [Wintun](https://www.wintun.net/)
-
 ## License
 
-This project is a fork of v2rayN and is distributed under the
-[GNU General Public License v3.0](LICENSE). Bundled third-party components keep
-their own licenses (see `xray-dosyalari/` and `singbox-dosyalari/`).
+Colitu VPN for Windows is distributed under the
+[GNU General Public License v3.0](LICENSE). It includes open-source components
+(Xray-core, sing-box, Wintun and others) that keep their own licenses; see
+[NOTICE](NOTICE) for the full list.
 
 The "Colitu" name and logo are trademarks of Colitu and are not covered by the
-GPL. If you publish a fork, please use your own name and branding.
+GPL. If you redistribute a modified version, please use your own name and
+branding.

@@ -1,5 +1,5 @@
 sing-box rule sets for the "Russian sites direct" rules (ColituVpnService.BuildColituRoutingRules).
-Copied into bin\srss\ at build time; v2rayN uses a local bin\srss\<tag>.srs before it would download one
+Copied into bin\srss\ at build time; the core layer uses a local bin\srss\<tag>.srs before it would download one
 (raw.githubusercontent.com is not reachable from Russia, so they must ship with the app).
 Xray reads the same rules from xray-dosyalari\geoip.dat and geosite.dat.
 

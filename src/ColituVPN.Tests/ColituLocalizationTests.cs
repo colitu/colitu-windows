@@ -98,11 +98,11 @@ public class ColituLocalizationTests
     private static string FindAppSource()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "v2rayN", "Views")))
+        while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "ColituVPN", "Views")))
         {
             directory = directory.Parent;
         }
         directory.Should().NotBeNull("the tests run inside the repository");
-        return Path.Combine(directory!.FullName, "v2rayN");
+        return Path.Combine(directory!.FullName, "ColituVPN");
     }
 }

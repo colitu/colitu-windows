@@ -13,8 +13,8 @@ are welcome.
 ## Building
 
 ```
-cd v2rayN
-dotnet build v2rayN.sln -c Release
+cd src
+dotnet build ColituVPN.sln -c Release
 dotnet test ServiceLib.Tests/ServiceLib.Tests.csproj -c Release
 ```
 

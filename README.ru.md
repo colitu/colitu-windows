@@ -3,14 +3,14 @@
 [English](README.md) · **Русский**
 
 Десктопный клиент [Colitu VPN](https://colitu.com) для Windows с открытым
-исходным кодом. Управление ядрами, системный прокси, TUN, маршрутизация и DNS
-взяты из [v2rayN](https://github.com/2dust/v2rayN), а поверх работает единое
-окно Colitu: аккаунт, серверы и подключение через Colitu API.
+исходным кодом. Единое окно приложения отвечает за аккаунт, локации и
+подключение через Colitu API; под ним работает слой ядра, который запускает
+Xray и sing-box и управляет системным прокси, TUN-адаптером, маршрутизацией и DNS.
 
 | | |
 |---|---|
 | Приложение | `Colitu VPN` (`ColituVPN.exe`), WPF на .NET 8 |
-| Версия | `2.4.1` (`v2rayN/Directory.Build.props`) |
+| Версия | `2.5.1` (`src/Directory.Build.props`) |
 | ОС | Windows 10 / 11, x64 |
 | Языки | русский, английский, турецкий |
 | Сайт | <https://colitu.com> · [загрузки](https://colitu.com/downloads/windows) |
@@ -55,7 +55,7 @@
 4. При выборе локации вызывается `PUT /me/preferences`, затем
    `GET /config?protocol=auto` возвращает основной профиль и запасные.
 5. Профили преобразуются в ссылки `vless://`, `trojan://`, `ss://` и
-   `hysteria2://`, импортируются в ядро v2rayN и проверяются по очереди.
+   `hysteria2://`, импортируются в слой ядра (`src/ServiceLib`) и проверяются по очереди.
 6. Результат отправляется в `POST /client/protocol-observations`.
 
 Цены, доступность и лимиты устройств приложение само не вычисляет: источник
@@ -64,13 +64,15 @@
 ## Структура проекта
 
 ```
-v2rayN/
-  v2rayN/                 приложение WPF (сборка ColituVPN)
+src/
+  ColituVPN/              приложение WPF (ColituVPN.exe)
     Services/Colitu*.cs   API, авторизация, VPN, kill switch, оплата, поддержка, обновления, локализация
     Views/ColituMainWindow*   оболочка Colitu, по одному partial-файлу на страницу
     Styles/               тема и ресурсы бренда Colitu
-  ServiceLib/             ядро v2rayN, генерация конфигов, маршрутизация, DNS
+  ServiceLib/             слой ядра: генерация конфигов, маршрутизация, DNS, процессы ядер
+  AmazTool/               помощник, заменяющий файлы при обновлении
   *.Tests/                юнит-тесты (xUnit)
+  ColituVPN.sln
 xray-dosyalari/           файлы Xray для установщика (xray.exe не хранится в git)
 singbox-dosyalari/        файлы sing-box для Hysteria2 (sing-box.exe не хранится в git)
 installer/ColituVPN.iss   скрипт Inno Setup
@@ -85,9 +87,9 @@ design/                   макеты интерфейса
 
 ```powershell
 git clone https://github.com/cyberlexs/colitu-windows.git
-cd colitu-windows\v2rayN
-dotnet build v2rayN.sln -c Release
-dotnet test v2rayN.sln -c Release
+cd colitu-windows\src
+dotnet build ColituVPN.sln -c Release
+dotnet test ColituVPN.sln -c Release
 ```
 
 ### Установщик
@@ -104,7 +106,7 @@ dotnet test v2rayN.sln -c Release
 Затем выполните:
 
 ```powershell
-pwsh .\scripts\build-installer.ps1 -Version 2.4.1
+pwsh .\scripts\build-installer.ps1 -Version 2.5.1
 ```
 
 В `artifacts/installer/` появятся `ColituVPN-Setup-<версия>-x64.exe`, его копия
@@ -126,21 +128,13 @@ SmartScreen.
 Если вы нашли уязвимость, пожалуйста, не создавайте публичный issue. Напишите
 на **support@colitu.com**, и мы с вами свяжемся.
 
-## Благодарности
-
-Colitu для Windows основан на этих проектах:
-
-- [v2rayN](https://github.com/2dust/v2rayN) (GPL-3.0): форк, на котором построен клиент
-- [Xray-core](https://github.com/XTLS/Xray-core) (MPL-2.0)
-- [sing-box](https://github.com/SagerNet/sing-box) (GPL-3.0)
-- [Wintun](https://www.wintun.net/)
-
 ## Лицензия
 
-Проект является форком v2rayN и распространяется по лицензии
-[GNU General Public License v3.0](LICENSE). Встроенные сторонние компоненты
-сохраняют свои лицензии (см. `xray-dosyalari/` и `singbox-dosyalari/`).
+Colitu VPN для Windows распространяется по лицензии
+[GNU General Public License v3.0](LICENSE). В состав входят компоненты с
+открытым исходным кодом (Xray-core, sing-box, Wintun и другие), которые
+сохраняют свои лицензии; полный список — в файле [NOTICE](NOTICE).
 
 Название и логотип «Colitu» являются товарными знаками Colitu и не подпадают
-под действие GPL. Если вы публикуете форк, используйте собственное название и
-оформление.
+под действие GPL. Если вы распространяете изменённую версию, используйте
+собственное название и оформление.

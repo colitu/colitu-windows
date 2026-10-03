@@ -7,6 +7,7 @@
 		<UseWPF>true</UseWPF>
 		<ApplicationIcon>Resources\colitu.ico</ApplicationIcon>
 		<AssemblyName>ColituVPN</AssemblyName>
+		<RootNamespace>v2rayN</RootNamespace>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>

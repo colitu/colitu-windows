@@ -6,6 +6,7 @@
     <UseWPF>true</UseWPF>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <RootNamespace>v2rayN.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\v2rayN\v2rayN.csproj" />
+    <ProjectReference Include="..\ColituVPN\ColituVPN.csproj" />
   </ItemGroup>
 
 </Project>

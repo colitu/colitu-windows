@@ -34,8 +34,8 @@ In scope: this repository's code and the release files built from it
 the Colitu API.
 
 Out of scope: denial of service, social engineering, physical attacks and
-problems in upstream projects (report those upstream, e.g. Xray-core,
-sing-box, v2rayN/v2rayNG).
+problems in third-party components (report those to the project concerned,
+e.g. Xray-core or sing-box).
 
 The machine-readable contact is at
 <https://colitu.com/.well-known/security.txt>, and the technical security

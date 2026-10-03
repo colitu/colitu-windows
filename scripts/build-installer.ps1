@@ -18,7 +18,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$projectPath = Join-Path $repoRoot "v2rayN\v2rayN\v2rayN.csproj"
+$projectPath = Join-Path $repoRoot "src\ColituVPN\ColituVPN.csproj"
 $issPath = Join-Path $repoRoot "installer\ColituVPN.iss"
 $publishDir = Join-Path $repoRoot "artifacts\publish\ColituVPN\$Runtime"
 $installerDir = Join-Path $repoRoot "artifacts\installer"
