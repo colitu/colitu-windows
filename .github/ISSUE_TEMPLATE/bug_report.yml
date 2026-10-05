@@ -1,0 +1,89 @@
+name: Bug report
+description: Something in the Colitu Windows app does not work as expected.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        - **Security problems:** do not use this form. Write to security@colitu.com (see SECURITY.md).
+        - **Account, payment or connection-to-a-location problems:** please contact support at https://colitu.com/support. Those are not code bugs and we cannot see your account here.
+        - Never post your e-mail, password, subscription link, keys or IP address. Remove them from logs and screenshots.
+
+        Можно писать на русском. Türkçe de yazabilirsiniz.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the app
+        2. Tap ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      placeholder: "2.5.3 (Settings → About)"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version
+      placeholder: "Windows 11 23H2 x64"
+    validations:
+      required: true
+  - type: dropdown
+    id: method
+    attributes:
+      label: Connection method
+      options:
+        - Automatic (default)
+        - Fast (Hysteria2)
+        - Stealth (VLESS Reality)
+        - Resilient (VLESS XHTTP)
+        - Classic (Trojan)
+        - Light (Shadowsocks 2022)
+        - I don't know
+    validations:
+      required: false
+  - type: input
+    id: network
+    attributes:
+      label: Country and network type
+      description: Optional. Helps with blocking-related problems. Do not post your IP address.
+      placeholder: "Russia, mobile data (MTS)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Optional. Remove personal data first. Text logs are pasted as code automatically.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I am using the latest version of the app.
+          required: true
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: I removed personal data (e-mail, keys, subscription links, IP addresses) from this report.
+          required: true

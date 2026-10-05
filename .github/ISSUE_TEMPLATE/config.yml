@@ -1,5 +1,11 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
-  - name: Colitu Destek
+  - name: Colitu Support
     url: https://colitu.com/support
-    about: Hesap, ödeme ve bağlantı sorunları için Colitu destek sayfasını kullanın.
+    about: Account, payment and connection problems are handled by Colitu support.
+  - name: Security report
+    url: https://colitu.com/security#disclosure
+    about: Please report vulnerabilities privately to security@colitu.com, not in a public issue.
+  - name: Documentation
+    url: https://docs.colitu.com
+    about: Setup guides and answers to common questions.
