@@ -1,7 +1,7 @@
 # Colitu VPN для Windows
 
-[![Build](https://img.shields.io/github/actions/workflow/status/colitu/colitu-windows/build.yml?branch=main&style=flat-square&label=build&labelColor=101014)](https://github.com/colitu/colitu-windows/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/colitu/colitu-windows?style=flat-square&labelColor=101014&color=7c6cff)](https://github.com/colitu/colitu-windows/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/colitu/windows/build.yml?branch=main&style=flat-square&label=build&labelColor=101014)](https://github.com/colitu/windows/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/colitu/windows?style=flat-square&labelColor=101014&color=7c6cff)](https://github.com/colitu/windows/releases/latest)
 [![License](https://img.shields.io/badge/license-GPL--3.0-7c6cff?style=flat-square&labelColor=101014)](LICENSE)
 [![Colitu Network](https://img.shields.io/endpoint?url=https://status.colitu.com/api/github-badge/network&style=flat-square)](https://status.colitu.com)
 
@@ -91,8 +91,8 @@ design/                   макеты интерфейса
 [Inno Setup 6](https://jrsoftware.org/isinfo.php) для установщика.
 
 ```powershell
-git clone https://github.com/colitu/colitu-windows.git
-cd colitu-windows\src
+git clone https://github.com/colitu/windows.git
+cd windows\src
 dotnet build ColituVPN.sln -c Release
 dotnet test ColituVPN.sln -c Release
 ```
