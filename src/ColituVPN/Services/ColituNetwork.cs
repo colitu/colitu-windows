@@ -271,7 +271,15 @@ public static class ColituNetwork
         var buffer = Marshal.AllocHGlobal(size);
         try
         {
-            if (GetIpForwardTable(buffer, ref size, false) != 0)
+            // The table can grow between the two calls (the TUN adapter adding its routes):
+            // retry with the size Windows asks for instead of reporting "no default route".
+            int status;
+            for (var attempt = 0; (status = GetIpForwardTable(buffer, ref size, false)) == ErrorInsufficientBuffer && attempt < 3; attempt++)
+            {
+                Marshal.FreeHGlobal(buffer);
+                buffer = Marshal.AllocHGlobal(size);
+            }
+            if (status != 0)
             {
                 return result;
             }
@@ -316,6 +324,8 @@ public static class ColituNetwork
         public uint dwForwardMetric4;
         public uint dwForwardMetric5;
     }
+
+    private const int ErrorInsufficientBuffer = 122;
 
     [DllImport("iphlpapi.dll")]
     private static extern int GetIpForwardTable(IntPtr table, ref int size, bool order);

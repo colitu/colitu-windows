@@ -67,7 +67,7 @@ internal static class WindowsUtils
             {
                 var sum = MD5.HashData(Encoding.UTF8.GetBytes(tunName));
                 var guid = new Guid(sum);
-                var pnpUtilPath = @"C:\Windows\System32\pnputil.exe";
+                var pnpUtilPath = Path.Combine(Environment.SystemDirectory, "pnputil.exe");
                 var arg = $$""" /remove-device  "SWD\Wintun\{{{guid}}}" """;
 
                 // Try to remove the device

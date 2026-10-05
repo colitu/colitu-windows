@@ -65,6 +65,8 @@ public partial class ColituMainWindow
         else
         {
             PasswordBox.Password = PasswordPlainBox.Text;
+            // A hidden TextBox would keep the password in plain text for nothing.
+            PasswordPlainBox.Clear();
             PasswordBox.Visibility = Visibility.Visible;
             PasswordPlainBox.Visibility = Visibility.Collapsed;
             PasswordBox.Focus();
@@ -186,6 +188,7 @@ public partial class ColituMainWindow
         AuthSpinner.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         EmailBox.IsEnabled = PasswordBox.IsEnabled = PasswordPlainBox.IsEnabled = PasswordRepeatBox.IsEnabled = !busy;
         AuthLoginTab.IsEnabled = AuthRegisterTab.IsEnabled = !busy;
+        ForgotButton.IsEnabled = !busy;
     }
 
     private void ShowAuthError(string message)
@@ -201,15 +204,38 @@ public partial class ColituMainWindow
 
     private void TermsLink_Click(object sender, RoutedEventArgs e) => OpenUrl(LocalizedPath("/legal/terms"));
 
+    private bool _signingOut;
+
     private async void SignOut_Click(object sender, RoutedEventArgs e)
     {
-        await _vpn.ForgetAccountAsync();
-        StopSupportPolling();
-        await _auth.LogoutAsync();
-        _servers = [];
-        _usage = null;
-        _planRequired = false;
-        AuthLoginTab.IsChecked = true;
-        ShowAuth();
+        if (_signingOut)
+        {
+            return;
+        }
+        _signingOut = true;
+        try
+        {
+            await _vpn.ForgetAccountAsync();
+        }
+        catch (Exception ex)
+        {
+            // Disconnecting failed: sign out all the same, a half signed-out app is worse.
+            Logging.SaveLog("ColituMainWindow.SignOut", ex);
+        }
+        try
+        {
+            ClearAccountViews();
+            await _auth.LogoutAsync();
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.SignOut", ex);
+        }
+        finally
+        {
+            _signingOut = false;
+            AuthLoginTab.IsChecked = true;
+            ShowAuth();
+        }
     }
 }

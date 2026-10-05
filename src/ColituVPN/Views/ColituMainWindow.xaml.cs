@@ -24,6 +24,9 @@ public partial class ColituMainWindow
     private bool _trayHintShown;
     private string _page = "home";
     private bool _offline;
+    private bool _navigating;
+    /// <summary>Bumped on every sign-out: answers to requests of the previous account are dropped.</summary>
+    private int _accountEpoch;
 
     public ColituMainWindow()
     {
@@ -37,7 +40,17 @@ public partial class ColituMainWindow
             ShowToast(Loc.I[key], key.StartsWith("err", StringComparison.Ordinal));
             ApplyStatus();
         });
-        _auth.SessionExpired += _ => Dispatcher.BeginInvoke(async () => await OnSessionExpiredAsync());
+        _auth.SessionExpired += _ => Dispatcher.BeginInvoke(async () =>
+        {
+            try
+            {
+                await OnSessionExpiredAsync();
+            }
+            catch (Exception ex)
+            {
+                Logging.SaveLog("ColituMainWindow.SessionExpired", ex);
+            }
+        });
         _updater.UpdateAvailable += info => Dispatcher.BeginInvoke(() => ShowUpdate(info));
 
         _clock = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -53,7 +66,12 @@ public partial class ColituMainWindow
         Loaded += OnLoaded;
         Closing += OnClosing;
         SourceInitialized += (_, _) => ApplyRoundedCorners();
-        StateChanged += (_, _) => ApplyWindowShape();
+        StateChanged += (_, _) =>
+        {
+            ApplyWindowShape();
+            UpdateSupportPolling();
+        };
+        IsVisibleChanged += (_, _) => UpdateSupportPolling();
         Root.SizeChanged += (_, _) => UpdateRootClip();
 
         BuildLanguageSelectors();
@@ -64,7 +82,17 @@ public partial class ColituMainWindow
         TrayIcon.TrayMouseDoubleClick += (_, _) => ShowFromTray();
         TrayIcon.TrayLeftMouseUp += (_, _) => ShowFromTray();
         VersionText.Text = Loc.I.Format("settings.version", ("version", ColituAuthService.ClientVersion));
-        await StartAsync();
+        try
+        {
+            await StartAsync();
+        }
+        catch (Exception ex)
+        {
+            // Never stay on the loading screen: offer sign-in (a saved session is kept).
+            Logging.SaveLog("ColituMainWindow.StartAsync", ex);
+            ShowAuth();
+            ShowAuthError(Loc.I["err.generic"]);
+        }
     }
 
     private async Task StartAsync()
@@ -102,10 +130,11 @@ public partial class ColituMainWindow
         ApplyStatus();
         _ = Dispatcher.BeginInvoke(() => MoveNavThumb(false), DispatcherPriority.Loaded);
 
+        // A previous offline spell may have left the 20 s retry interval behind.
+        _refresh.Interval = offline ? TimeSpan.FromSeconds(20) : TimeSpan.FromMinutes(5);
         if (offline)
         {
             ShowToast(Loc.I["home.offline"], true);
-            _refresh.Interval = TimeSpan.FromSeconds(20);
         }
         else
         {
@@ -116,39 +145,62 @@ public partial class ColituMainWindow
 
         if (!_planRequired || offline)
         {
+            // Not awaited: sign-in, verification and reset screens finish right away instead
+            // of waiting (with a spinner) until the tunnel is up.
+            _ = AutoConnectAsync();
+        }
+    }
+
+    private async Task AutoConnectAsync()
+    {
+        try
+        {
             if (await _vpn.TryAutoConnectAsync())
             {
                 ApplyStatus();
             }
         }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.AutoConnectAsync", ex);
+            ApplyStatus();
+        }
     }
 
-    /// <summary>Reloads the account, plan, servers and usage. Also resumes an offline session.</summary>
-    private async Task RefreshDataAsync(bool includeAccount = true)
+    /// <summary>
+    /// Reloads the account, plan, servers and usage. Also resumes an offline session.
+    /// False when the panel could not be reached (the cached details stay on screen).
+    /// </summary>
+    private async Task<bool> RefreshDataAsync(bool includeAccount = true)
     {
         if (!_auth.HasSession)
         {
-            return;
+            return false;
         }
+        var epoch = _accountEpoch;
 
         try
         {
             if (_offline)
             {
                 var state = await _auth.ResumeAsync();
+                if (epoch != _accountEpoch)
+                {
+                    return false;
+                }
                 if (state == ColituStartupState.SignedOut)
                 {
                     await OnSessionExpiredAsync();
-                    return;
+                    return false;
                 }
                 if (state == ColituStartupState.VerificationRequired)
                 {
                     ShowVerify(codeJustSent: false);
-                    return;
+                    return false;
                 }
                 if (state == ColituStartupState.Offline)
                 {
-                    return;
+                    return false;
                 }
                 _offline = false;
                 _refresh.Interval = TimeSpan.FromMinutes(5);
@@ -159,6 +211,10 @@ public partial class ColituMainWindow
             }
 
             var servers = await _vpn.GetServersAsync();
+            if (epoch != _accountEpoch)
+            {
+                return false;
+            }
             _servers = servers.Servers;
             BuildCategoryFilter();
             _planRequired = servers.PlanRequired || _auth.CurrentSubscription?.Active != true;
@@ -171,10 +227,17 @@ public partial class ColituMainWindow
             {
                 await LoadDevicesAsync();
             }
+            return true;
+        }
+        catch (ColituApiException ex) when (ex.ErrorCode is "SIGNED_OUT")
+        {
+            // Signed out while this ran; nothing to show.
+            return false;
         }
         catch (ColituApiException ex) when (ex.Terminal)
         {
             await OnSessionExpiredAsync();
+            return false;
         }
         catch (Exception ex) when (ColituVpnService.IsNetworkFailure(ex))
         {
@@ -183,10 +246,12 @@ public partial class ColituMainWindow
                 _offline = true;
                 _refresh.Interval = TimeSpan.FromSeconds(20);
             }
+            return false;
         }
         catch (Exception ex)
         {
             Logging.SaveLog("ColituMainWindow.RefreshDataAsync", ex);
+            return false;
         }
     }
 
@@ -196,11 +261,33 @@ public partial class ColituMainWindow
         {
             return;
         }
-        await _vpn.ForgetAccountAsync();
-        StopSupportPolling();
+        try
+        {
+            await _vpn.ForgetAccountAsync();
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.OnSessionExpiredAsync", ex);
+        }
+        // A 403 DEVICE_REVOKED (not a 401) ends the session too: drop the saved tokens.
+        _auth.DiscardSession();
+        ClearAccountViews();
         ShowAuth();
         ShowAuthError(Loc.I["auth.expired"]);
         ShowFromTray();
+    }
+
+    /// <summary>Forgets what the signed-out account showed, so the next account never sees it.</summary>
+    private void ClearAccountViews()
+    {
+        _accountEpoch++;
+        StopSupportPolling();
+        _servers = [];
+        _usage = null;
+        _planRequired = false;
+        _offline = false;
+        DeviceList.ItemsSource = null;
+        DevicesTitle.Text = "";
     }
 
     // ── Views and navigation ───────────────────────────────────────────────
@@ -215,7 +302,8 @@ public partial class ColituMainWindow
 
     private void Nav_Checked(object sender, RoutedEventArgs e)
     {
-        if (sender is RadioButton { Tag: string page } && IsLoaded)
+        // Navigate checks the tab itself; that must not navigate (and load the page) twice.
+        if (!_navigating && sender is RadioButton { Tag: string page } && IsLoaded)
         {
             Navigate(page);
         }
@@ -257,7 +345,15 @@ public partial class ColituMainWindow
         }
         else if (nav.IsChecked != true)
         {
-            nav.IsChecked = true;
+            _navigating = true;
+            try
+            {
+                nav.IsChecked = true;
+            }
+            finally
+            {
+                _navigating = false;
+            }
         }
         NavThumb.BeginAnimation(OpacityProperty, new DoubleAnimation(nav == null ? 0 : 1, TimeSpan.FromMilliseconds(260)));
         MoveNavThumb(animate);
@@ -381,9 +477,16 @@ public partial class ColituMainWindow
             return;
         }
 
-        // Rebuilding the selectors inside their own Checked event would recurse; defer it.
-        await Dispatcher.InvokeAsync(() => ApplyLanguage(language), DispatcherPriority.Background);
-        await _vpn.UpdatePreferencesAsync(_vpn.Preferences with { Language = language });
+        try
+        {
+            // Rebuilding the selectors inside their own Checked event would recurse; defer it.
+            await Dispatcher.InvokeAsync(() => ApplyLanguage(language), DispatcherPriority.Background);
+            await _vpn.UpdatePreferencesAsync(_vpn.Preferences with { Language = language });
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.LanguageOption_Checked", ex);
+        }
     }
 
     // ── Toast ──────────────────────────────────────────────────────────────
@@ -482,7 +585,14 @@ public partial class ColituMainWindow
         }
         if (_vpn.KillSwitchEngaged && _vpn.Status != ColituVpnStatus.Connected)
         {
-            await _vpn.DisconnectAsync();
+            try
+            {
+                await _vpn.DisconnectAsync();
+            }
+            catch (Exception ex)
+            {
+                Logging.SaveLog("ColituMainWindow.TrayConnect", ex);
+            }
             ApplyStatus();
             return;
         }

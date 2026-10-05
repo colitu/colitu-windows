@@ -31,7 +31,10 @@ public sealed class ColituAuthService
     private static readonly string[] SupportedProtocols = ["hysteria2", "vless-reality", "vless-xhttp", "trojan", "shadowsocks"];
 
     // Direct to the panel: while the tunnel restarts the system proxy still points at the stopped core.
-    private HttpClient _httpClient = CreateHttpClient();
+    private HttpClient _httpClient = CreateHttpClient(TimeSpan.FromSeconds(20));
+    // Support attachments (up to 5 x 10 MB) need more than 20 s on a slow uplink.
+    private HttpClient _transferClient = CreateHttpClient(TimeSpan.FromMinutes(10));
+    private readonly object _persistLock = new();
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
     private readonly SemaphoreSlim _deviceLock = new(1, 1);
@@ -39,6 +42,13 @@ public sealed class ColituAuthService
     private string? _accessToken;
     private string? _refreshToken;
     private DateTimeOffset? _accessTokenExpiresAt;
+
+    /// <summary>
+    /// Bumped by every sign-out. A request or token refresh that started under an older
+    /// session must neither save tokens (the session would come back after sign-out) nor
+    /// expire the session that replaced it (a new sign-in would be wiped).
+    /// </summary>
+    private long _sessionGeneration;
 
     /// <summary>
     /// Raised when the session can no longer be refreshed (revoked, device removed,
@@ -103,11 +113,17 @@ public sealed class ColituAuthService
             return ColituStartupState.SignedOut;
         }
 
+        var generation = Interlocked.Read(ref _sessionGeneration);
         try
         {
             if (IsAccessTokenExpiring())
             {
                 var outcome = await RefreshSingleFlightAsync(_accessToken);
+                if (generation != Interlocked.Read(ref _sessionGeneration))
+                {
+                    // Signed out (or into another account) meanwhile: nothing to resume.
+                    return HasSession ? ColituStartupState.Offline : ColituStartupState.SignedOut;
+                }
                 if (outcome == ColituRefreshOutcome.Terminal)
                 {
                     ClearSession();
@@ -129,6 +145,11 @@ public sealed class ColituAuthService
         {
             MarkVerificationPending();
             return ColituStartupState.VerificationRequired;
+        }
+        catch (ColituApiException ex) when (ex.ErrorCode is "SIGNED_OUT" || generation != Interlocked.Read(ref _sessionGeneration))
+        {
+            // The session was replaced while this ran; leave the new one alone.
+            return HasSession ? ColituStartupState.Offline : ColituStartupState.SignedOut;
         }
         catch (ColituApiException ex) when (ex.Terminal || ex.ErrorCode is "SESSION_EXPIRED")
         {
@@ -252,13 +273,20 @@ public sealed class ColituAuthService
         };
     }
 
-    private static HttpClient CreateHttpClient() => new(new SocketsHttpHandler
+    private static HttpClient CreateHttpClient(TimeSpan timeout) => new(new SocketsHttpHandler
     {
         UseProxy = false,
+        // The API never redirects; a redirect would resend a password or refresh token
+        // (307/308 keep the body) and the device id to another address.
+        AllowAutoRedirect = false,
         ConnectTimeout = TimeSpan.FromSeconds(8),
         PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
     })
-    { Timeout = TimeSpan.FromSeconds(20) };
+    {
+        Timeout = timeout,
+        // Responses are read into memory: a broken or hostile answer can't grow without bound.
+        MaxResponseContentBufferSize = 64L << 20
+    };
 
     /// <summary>
     /// The tunnel just came up or went down. Keep-alive connections opened over the old route
@@ -267,9 +295,11 @@ public sealed class ColituAuthService
     /// </summary>
     public void ResetConnections()
     {
-        var old = Interlocked.Exchange(ref _httpClient, CreateHttpClient());
+        var old = Interlocked.Exchange(ref _httpClient, CreateHttpClient(TimeSpan.FromSeconds(20)));
         // Requests already in flight keep the old client; dispose it once they are done.
         _ = Task.Delay(TimeSpan.FromSeconds(30)).ContinueWith(_ => old.Dispose(), TaskScheduler.Default);
+        var oldTransfer = Interlocked.Exchange(ref _transferClient, CreateHttpClient(TimeSpan.FromMinutes(10)));
+        _ = Task.Delay(TimeSpan.FromMinutes(11)).ContinueWith(_ => oldTransfer.Dispose(), TaskScheduler.Default);
     }
 
     public async Task<T?> GetAuthorizedJsonAsync<T>(string path, CancellationToken token = default)
@@ -294,9 +324,9 @@ public sealed class ColituAuthService
     }
 
     /// <summary>Sends any request with the session's token (refreshing it once on 401) and throws on failure.</summary>
-    public async Task<HttpResponseMessage> SendAuthorizedRequestAsync(Func<HttpRequestMessage> requestFactory)
+    public async Task<HttpResponseMessage> SendAuthorizedRequestAsync(Func<HttpRequestMessage> requestFactory, bool transfer = false)
     {
-        var response = await SendAuthorizedAsync(requestFactory);
+        var response = await SendAuthorizedAsync(requestFactory, transfer: transfer);
         try
         {
             await EnsureSuccessAsync(response);
@@ -356,10 +386,12 @@ public sealed class ColituAuthService
             var tokens = await ReadJsonAsync<ColituTokenDto>(response);
             if (string.IsNullOrWhiteSpace(tokens?.AccessToken) || string.IsNullOrWhiteSpace(tokens.RefreshToken))
             {
-                return ColituAuthResult.Fail("Sign-in response was incomplete.");
+                return ColituAuthResult.Fail(Loc.I["err.generic"]);
             }
 
             // A new sign-in always re-registers this installation for the signed-in account.
+            // Requests and refreshes still running for the previous session must not touch it.
+            Interlocked.Increment(ref _sessionGeneration);
             _session = new ColituSession { PendingEmail = email };
             PendingVerification = false;
             SaveTokens(tokens.AccessToken, tokens.RefreshToken);
@@ -418,6 +450,7 @@ public sealed class ColituAuthService
         await _deviceLock.WaitAsync();
         try
         {
+            var generation = Interlocked.Read(ref _sessionGeneration);
             var body = new
             {
                 device_key = DeviceId,
@@ -439,6 +472,7 @@ public sealed class ColituAuthService
             {
                 throw new ColituApiException(HttpStatusCode.BadGateway, "Device registration response was incomplete.", "DEVICE_REGISTRATION_INVALID");
             }
+            ThrowIfSessionChanged(generation);
 
             _session.RegisteredDeviceId = device.Id;
             _session.RegisteredAppVersion = ClientVersion;
@@ -458,6 +492,7 @@ public sealed class ColituAuthService
 
     private async Task<ColituMeResponse> LoadMeAsync()
     {
+        var generation = Interlocked.Read(ref _sessionGeneration);
         var me = await GetAuthorizedJsonAsync<ColituMeDto>("/me")
             ?? throw new ColituApiException(HttpStatusCode.BadGateway, "Account response was empty.", "INVALID_USER_RESPONSE");
 
@@ -471,6 +506,8 @@ public sealed class ColituAuthService
             entitlement = null;
         }
 
+        // Signed out while the account was loading: don't show (or save) it again.
+        ThrowIfSessionChanged(generation);
         var subscription = MapSubscription(entitlement);
         CurrentUser = new ColituUser
         {
@@ -517,8 +554,9 @@ public sealed class ColituAuthService
         };
     }
 
-    private async Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory, bool allowRefresh = true, bool includeDevice = true, CancellationToken token = default)
+    private async Task<HttpResponseMessage> SendAuthorizedAsync(Func<HttpRequestMessage> requestFactory, bool allowRefresh = true, bool includeDevice = true, CancellationToken token = default, bool transfer = false)
     {
+        var http = transfer ? _transferClient : _httpClient;
         // Refresh proactively just before the access token expires so that
         // parallel requests do not all hit 401 and race each other to refresh.
         if (allowRefresh && IsAccessTokenExpiring() && !string.IsNullOrWhiteSpace(_refreshToken))
@@ -526,9 +564,17 @@ public sealed class ColituAuthService
             await RefreshSingleFlightAsync(_accessToken);
         }
 
+        var generation = Interlocked.Read(ref _sessionGeneration);
+        if (string.IsNullOrWhiteSpace(_accessToken) && string.IsNullOrWhiteSpace(_refreshToken))
+        {
+            // Signed out (a poll that was already running): don't send an anonymous request
+            // whose 401 would end in "session expired".
+            throw new ColituApiException(HttpStatusCode.Unauthorized, Loc.I["auth.expired"], "SIGNED_OUT");
+        }
+
         var tokenUsed = _accessToken;
         var request = PrepareAuthorized(requestFactory(), tokenUsed, includeDevice);
-        var response = await _httpClient.SendAsync(request, token);
+        var response = await http.SendAsync(request, token);
         if (response.StatusCode != HttpStatusCode.Unauthorized || !allowRefresh)
         {
             return response;
@@ -536,6 +582,10 @@ public sealed class ColituAuthService
 
         response.Dispose();
         var outcome = await RefreshSingleFlightAsync(tokenUsed);
+        if (generation != Interlocked.Read(ref _sessionGeneration))
+        {
+            throw new ColituApiException(HttpStatusCode.Unauthorized, Loc.I["auth.expired"], "SIGNED_OUT");
+        }
         if (outcome == ColituRefreshOutcome.Terminal)
         {
             ExpireSession("SESSION_EXPIRED");
@@ -545,11 +595,11 @@ public sealed class ColituAuthService
         {
             throw new ColituApiException(
                 HttpStatusCode.Unauthorized,
-                "Could not refresh the session. Please check your connection and try again.",
+                Loc.I["err.refresh"],
                 "REFRESH_FAILED");
         }
 
-        return await _httpClient.SendAsync(PrepareAuthorized(requestFactory(), _accessToken, includeDevice), token);
+        return await http.SendAsync(PrepareAuthorized(requestFactory(), _accessToken, includeDevice), token);
     }
 
     private HttpRequestMessage PrepareAuthorized(HttpRequestMessage request, string? token, bool includeDevice)
@@ -605,13 +655,22 @@ public sealed class ColituAuthService
     private async Task<ColituRefreshOutcome> RefreshLockedAsync()
     {
         if (string.IsNullOrWhiteSpace(_refreshToken)) return ColituRefreshOutcome.Terminal;
+        var generation = Interlocked.Read(ref _sessionGeneration);
         try
         {
             using var response = await SendClientJsonAsync(HttpMethod.Post, "/auth/refresh", new { refresh_token = _refreshToken }, includeDevice: true);
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                // Revoked, reused or device-removed refresh tokens cannot recover.
+                // Revoked or reused refresh tokens cannot recover.
                 return ColituRefreshOutcome.Terminal;
+            }
+            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+            {
+                // A removed device can't recover either, but a 403/404 page from a proxy, CDN
+                // or captive portal must not sign the user out.
+                return await ErrorCodeAsync(response) is "DEVICE_REVOKED" or "DEVICE_NOT_FOUND" or "DEVICE_TOKEN_MISMATCH" or "AUTH_REFRESH_REUSED"
+                    ? ColituRefreshOutcome.Terminal
+                    : ColituRefreshOutcome.Transient;
             }
             if (!response.IsSuccessStatusCode)
             {
@@ -620,12 +679,34 @@ public sealed class ColituAuthService
             }
             var tokens = await ReadJsonAsync<ColituTokenDto>(response);
             if (string.IsNullOrWhiteSpace(tokens?.AccessToken)) return ColituRefreshOutcome.Transient;
+            // Signed out while the refresh was in flight: don't bring the session back.
+            if (generation != Interlocked.Read(ref _sessionGeneration)) return ColituRefreshOutcome.Transient;
             SaveTokens(tokens.AccessToken, tokens.RefreshToken ?? _refreshToken!);
             return ColituRefreshOutcome.Success;
         }
         catch
         {
             return ColituRefreshOutcome.Transient;
+        }
+    }
+
+    private void ThrowIfSessionChanged(long generation)
+    {
+        if (generation != Interlocked.Read(ref _sessionGeneration))
+        {
+            throw new ColituApiException(HttpStatusCode.Unauthorized, Loc.I["auth.expired"], "SIGNED_OUT");
+        }
+    }
+
+    /// <summary>
+    /// Drops the saved session after the panel ended it with a non-401 answer (403
+    /// DEVICE_REVOKED on a regular request): the tokens must not stay on disk.
+    /// </summary>
+    public void DiscardSession()
+    {
+        if (HasSession || PendingVerification)
+        {
+            ClearSession();
         }
     }
 
@@ -643,6 +724,25 @@ public sealed class ColituAuthService
             "SESSION_EXPIRED",
             null,
             terminal: true);
+    }
+
+    private static async Task<string?> ErrorCodeAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("code", out var code)
+                && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task<HttpResponseMessage> SendClientJsonAsync(HttpMethod method, string path, object body, bool includeDevice = false)
@@ -695,18 +795,24 @@ public sealed class ColituAuthService
         {
             return;
         }
-        _session.UpdatedAt = DateTimeOffset.UtcNow;
-        try
+        // The watchdog (thread pool) and the UI can save at the same time; a lost write could
+        // leave an already rotated refresh token on disk, which the panel treats as reuse.
+        lock (_persistLock)
         {
-            // Write-then-rename so a crash or power loss never leaves a torn session file.
+            _session.UpdatedAt = DateTimeOffset.UtcNow;
             var path = SessionPath();
-            var temp = path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(_session, _jsonOptions));
-            File.Move(temp, path, overwrite: true);
-        }
-        catch (Exception ex)
-        {
-            Logging.SaveLog("ColituAuthService.PersistSession", ex);
+            var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                // Write-then-rename so a crash or power loss never leaves a torn session file.
+                File.WriteAllText(temp, JsonSerializer.Serialize(_session, _jsonOptions));
+                File.Move(temp, path, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                Logging.SaveLog("ColituAuthService.PersistSession", ex);
+                try { File.Delete(temp); } catch { }
+            }
         }
     }
 
@@ -740,6 +846,7 @@ public sealed class ColituAuthService
 
     private void ClearSession()
     {
+        Interlocked.Increment(ref _sessionGeneration);
         _session = new();
         _accessToken = null;
         _refreshToken = null;
@@ -747,14 +854,32 @@ public sealed class ColituAuthService
         PendingVerification = false;
         CurrentUser = null;
         CurrentSubscription = null;
-        try
+        lock (_persistLock)
         {
-            if (File.Exists(SessionPath())) File.Delete(SessionPath());
+            for (var attempt = 0; attempt < 3 && File.Exists(SessionPath()); attempt++)
+            {
+                try
+                {
+                    File.Delete(SessionPath());
+                }
+                catch
+                {
+                    // Locked (an antivirus scan): try again, then overwrite the tokens instead.
+                    Thread.Sleep(100);
+                }
+            }
+            try
+            {
+                if (File.Exists(SessionPath())) File.WriteAllText(SessionPath(), "{}");
+            }
+            catch
+            {
+                // Nothing more to do.
+            }
         }
-        catch
-        {
-            // Ignore local cleanup failures.
-        }
+        // Cached connection settings carry this account's server credentials.
+        ColituVpnService.DeleteConfigCache();
+        ColituSupportService.DeleteDownloads();
     }
 
     private static string ResolveApiBaseUrl()
@@ -895,8 +1020,8 @@ public sealed class ColituAuthService
             {
                 if (error.ValueKind == JsonValueKind.Object)
                 {
-                    code = error.TryGetProperty("code", out var codeElement) ? codeElement.GetString() : null;
-                    message = error.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : null;
+                    code = error.TryGetProperty("code", out var codeElement) && codeElement.ValueKind == JsonValueKind.String ? codeElement.GetString() : null;
+                    message = error.TryGetProperty("message", out var messageElement) && messageElement.ValueKind == JsonValueKind.String ? messageElement.GetString() : null;
                 }
                 else if (error.ValueKind == JsonValueKind.String)
                 {
@@ -940,7 +1065,8 @@ public sealed class ColituAuthService
             "DEVICE_REVOKED" or "DEVICE_TOKEN_MISMATCH" or "AUTH_REFRESH_REUSED" or "AUTH_TOKEN_EXPIRED" => loc["auth.expired"],
             "NO_HEALTHY_NODES" or "CONFIG_NOT_AVAILABLE" or "INVALID_PREFERENCE" => loc["err.noServers"],
             _ when (int)status >= 500 => loc["err.network"],
-            _ when !string.IsNullOrWhiteSpace(message) => char.ToUpperInvariant(message[0]) + message[1..] + ".",
+            // The panel's own text is English only: shown only for codes the app does not know yet.
+            _ when !string.IsNullOrWhiteSpace(message) => char.ToUpperInvariant(message[0]) + message[1..] + (message.EndsWith('.') ? "" : "."),
             _ => loc["err.generic"]
         };
     }

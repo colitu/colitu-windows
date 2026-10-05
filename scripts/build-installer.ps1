@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
-    [string]$Version = "2.5.3",
+    [string]$Version = "2.5.4",
     [switch]$SkipPublish,
     # ECDSA P-256 private key (PKCS#8 PEM) that signs latest.json. Keep it off the repository;
     # the app only installs updates whose manifest verifies against the embedded public key.
@@ -15,6 +15,15 @@ $ErrorActionPreference = "Stop"
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     throw "Run this script with PowerShell 7 (pwsh): signing the update manifest needs .NET's PEM support."
+}
+# Minor and patch stay single digits: the version code is major*100 + minor*10 + patch,
+# so 2.5.10 would get the same code as 2.6.0 and never be offered as an update.
+if ($Version -notmatch '^\d+\.\d\.\d$') { throw "Version must look like 2.5.4 (one-digit minor and patch)" }
+
+# The app targets .NET 10. COLITU_DOTNET can point at an SDK outside PATH (D:\DEV\SDK\dotnet10\dotnet.exe).
+$dotnet = if ($env:COLITU_DOTNET) { $env:COLITU_DOTNET } else { "dotnet" }
+if (-not ((& $dotnet --list-sdks) -match '^10\.')) {
+    throw "A .NET 10 SDK is required ($dotnet has: $((& $dotnet --list-sdks) -join ', ')). Set COLITU_DOTNET to its dotnet.exe."
 }
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -79,7 +88,7 @@ if (-not $SkipPublish) {
     Write-Host "Publishing app..." -ForegroundColor Cyan
     # Passed as an environment variable: on the command line MSBuild would split it at the commas.
     $env:ColituAdBlockDoh = $adBlockDoh
-    dotnet publish $projectPath `
+    & $dotnet publish $projectPath `
         --configuration $Configuration `
         --runtime $Runtime `
         --self-contained true `
@@ -173,6 +182,21 @@ $manifest = [ordered]@{
     releaseNotes = ""
     signature = $signature
 }
+# Check the signature against the public key built into the app: a manifest signed with the
+# wrong key would be ignored by every installed copy without any error.
+$appSource = Get-Content -LiteralPath (Join-Path $repoRoot "src\ColituVPN\Services\ColituUpdateService.cs") -Raw
+$publicKeyPem = [regex]::Match($appSource, '-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----').Value -replace '(?m)^\s+', ''
+$verifyKey = [System.Security.Cryptography.ECDsa]::Create()
+try {
+    $verifyKey.ImportFromPem($publicKeyPem)
+    if (-not $verifyKey.VerifyData([System.Text.Encoding]::UTF8.GetBytes($signedText), [Convert]::FromBase64String($signature), [System.Security.Cryptography.HashAlgorithmName]::SHA256)) {
+        throw "latest.json does not verify against the app's public key: wrong signing key ($SigningKeyPath)."
+    }
+}
+finally {
+    $verifyKey.Dispose()
+}
+
 $stableInstallerPath = Join-Path $installerDir "ColituVPN-Setup-x64.exe"
 Copy-Item -Path $installerPath -Destination $stableInstallerPath -Force
 $manifestPath = Join-Path $installerDir "latest.json"

@@ -123,6 +123,68 @@ public static class ColituHardening
         return Convert.ToHexString(hash)[..16].ToLowerInvariant();
     });
 
+    /// <summary>
+    /// True when the app runs as a different Windows account than the one signed in to this
+    /// session: a standard user approved the UAC prompt with an administrator's credentials.
+    /// Per-user settings (the system proxy) then land in the administrator's profile.
+    /// </summary>
+    public static bool ElevatedAsAnotherUser => ElevatedAsAnotherUserLazy.Value;
+
+    private static readonly Lazy<bool> ElevatedAsAnotherUserLazy = new(() =>
+    {
+        try
+        {
+            var sessionUser = SessionAccount();
+            var processSid = WindowsIdentity.GetCurrent().User;
+            if (sessionUser == null || processSid == null)
+            {
+                return false;
+            }
+            // Compared by SID: account names come in several spellings (Microsoft and Entra
+            // accounts); a name that can't be resolved counts as "same user" (exception below).
+            var sessionSid = (SecurityIdentifier)new NTAccount(sessionUser).Translate(typeof(SecurityIdentifier));
+            return sessionSid != processSid;
+        }
+        catch
+        {
+            return false;
+        }
+    });
+
+    /// <summary>DOMAIN\user signed in to the session this process runs in, or null.</summary>
+    private static string? SessionAccount()
+    {
+        string? Query(int infoClass)
+        {
+            if (!WTSQuerySessionInformationW(IntPtr.Zero, WtsCurrentSession, infoClass, out var buffer, out _) || buffer == IntPtr.Zero)
+            {
+                return null;
+            }
+            try
+            {
+                return Marshal.PtrToStringUni(buffer);
+            }
+            finally
+            {
+                WTSFreeMemory(buffer);
+            }
+        }
+
+        var user = Query(WtsUserName);
+        var domain = Query(WtsDomainName);
+        return string.IsNullOrEmpty(user) ? null : string.IsNullOrEmpty(domain) ? user : $"{domain}\\{user}";
+    }
+
+    private const int WtsCurrentSession = -1;
+    private const int WtsUserName = 5;
+    private const int WtsDomainName = 7;
+
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool WTSQuerySessionInformationW(IntPtr server, int sessionId, int infoClass, out IntPtr buffer, out int bytesReturned);
+
+    [DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr memory);
+
     private static DirectorySecurity AdminOnlySecurity()
     {
         var security = new DirectorySecurity();

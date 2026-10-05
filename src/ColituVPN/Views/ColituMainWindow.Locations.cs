@@ -184,7 +184,11 @@ public partial class ColituMainWindow
         try
         {
             await _vpn.SwitchServerAsync(server);
-            ShowToast(Loc.I.Format("locations.switched", ("server", ServerLabel(_vpn.ConnectedServer) ?? row.Title)));
+            // Not after a switch that another choice cancelled.
+            if (_vpn.Status == ColituVpnStatus.Connected)
+            {
+                ShowToast(Loc.I.Format("locations.switched", ("server", ServerLabel(_vpn.ConnectedServer) ?? row.Title)));
+            }
         }
         catch (ColituPlanRequiredException)
         {

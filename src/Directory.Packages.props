@@ -25,9 +25,12 @@
     <PackageVersion Include="Semi.Avalonia.AvaloniaEdit" Version="11.2.0.2" />
     <PackageVersion Include="Semi.Avalonia.DataGrid" Version="11.3.7.3" />
     <PackageVersion Include="SharpVectors.Wpf" Version="1.8.5" />
-    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
     <PackageVersion Include="NLog" Version="6.1.2" />
     <PackageVersion Include="sqlite-net-pcl" Version="1.9.172" />
+    <!-- sqlite-net-pcl pulls 2.1.2 (2022); pinned to the newest 2.1.x with its SQLite fixes. -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_green" Version="2.1.11" />
+    <!-- The native SQLite of 2.1.11 and older has CVE-2025-6965 (GHSA-2m69-gcr7-jv3q). -->
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
     <PackageVersion Include="TaskScheduler" Version="2.12.2" />
     <PackageVersion Include="WebDav.Client" Version="2.9.0" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

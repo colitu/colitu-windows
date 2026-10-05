@@ -2,7 +2,7 @@
 
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
-		<TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+		<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
 		<GenerateSatelliteAssembliesForCore>true</GenerateSatelliteAssembliesForCore>
 		<UseWPF>true</UseWPF>
 		<ApplicationIcon>Resources\colitu.ico</ApplicationIcon>
@@ -22,7 +22,6 @@
 		</PackageReference>
 		<PackageReference Include="ReactiveUI.WPF" />
 		<PackageReference Include="SharpVectors.Wpf" />
-		<PackageReference Include="System.Security.Cryptography.ProtectedData" />
 	</ItemGroup>
 
 	<!-- Ad-blocking DoH servers, given by scripts/build-installer.ps1 (kept out of the repository). -->

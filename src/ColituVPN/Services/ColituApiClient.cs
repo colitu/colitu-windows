@@ -68,22 +68,6 @@ public sealed class ColituApiClient
     }
 
     /// <summary>
-    /// Measures TCP connect latency to each server's advertised latency endpoint.
-    /// The panel does not ping on the client's behalf, so this runs locally.
-    /// </summary>
-    public async Task<Dictionary<string, int?>?> PingAllAsync(string requestId, int timeoutMs)
-    {
-        var servers = await GetServersAsync();
-        var probes = servers.Servers
-            .Where(server => server.Id.IsNotEmpty())
-            .Select(async server => (server.Id!, await MeasureTcpLatencyAsync(server.Host, server.Port, timeoutMs)));
-        var results = await Task.WhenAll(probes);
-        return results
-            .GroupBy(result => result.Item1, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Last().Item2, StringComparer.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
     /// Stores the chosen location as this device's preferred node; an empty id
     /// lets the panel pick the recommended node ("best server").
     /// </summary>
@@ -181,7 +165,8 @@ public sealed class ColituApiClient
     private static async Task<Dictionary<string, string>> PinServerAddressesAsync(IEnumerable<ColituConfigProfileDto?> profiles, CancellationToken token)
     {
         var pinned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var host in profiles.Select(profile => profile == null ? null : ColituShareLinkBuilder.HostOf(profile.Payload)).Where(host => host != null).Distinct(StringComparer.OrdinalIgnoreCase))
+        // Only hosts a share link would accept are resolved (and logged).
+        foreach (var host in profiles.Select(profile => profile == null ? null : ColituShareLinkBuilder.HostOf(profile.Payload)).Where(ColituShareLinkBuilder.IsPlainHost).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (System.Net.IPAddress.TryParse(host, out _))
             {
@@ -274,28 +259,6 @@ public sealed class ColituApiClient
         return server;
     }
 
-    private static async Task<int?> MeasureTcpLatencyAsync(string? host, int? port, int timeoutMs)
-    {
-        if (host.IsNullOrEmpty() || port is null or < 1 or > 65535)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var client = new TcpClient();
-            using var timeout = new CancellationTokenSource(timeoutMs);
-            var watch = Stopwatch.StartNew();
-            await client.ConnectAsync(host!, port.Value, timeout.Token);
-            watch.Stop();
-            return Math.Max(1, (int)watch.ElapsedMilliseconds);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     internal static string? CountryName(string? code)
     {
         code = (code ?? "").Trim().ToUpperInvariant();
@@ -353,13 +316,26 @@ public static class ColituShareLinkBuilder
         return payload.ValueKind == JsonValueKind.Object ? Str(Obj(payload, "endpoint"), "host") : null;
     }
 
+    /// <summary>
+    /// An ASCII host name or an IP address without a zone id: what can go into a share link
+    /// (and a log line) unescaped.
+    /// </summary>
+    internal static bool IsPlainHost(string? host)
+    {
+        return !string.IsNullOrEmpty(host)
+            && host.Length <= 253
+            && host.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '.' or '-' or ':')
+            && Uri.CheckHostName(host) is UriHostNameType.Dns or UriHostNameType.IPv4 or UriHostNameType.IPv6;
+    }
+
     /// <param name="addressOverride">A resolved address to dial instead of the host name (TLS/Reality keep the name as SNI).</param>
     public static string? Build(JsonElement payload, string remarks, string? addressOverride = null)
     {
         if (payload.ValueKind != JsonValueKind.Object
             || !payload.TryGetProperty("schema_version", out var schema)
             || schema.ValueKind != JsonValueKind.Number
-            || schema.GetInt32() != 1)
+            || !schema.TryGetInt32(out var schemaVersion)
+            || schemaVersion != 1)
         {
             return null;
         }
@@ -371,7 +347,13 @@ public static class ColituShareLinkBuilder
         var security = Obj(payload, "security");
         var host = Str(endpoint, "host");
         var port = endpoint is { } e && e.TryGetProperty("port", out var portValue) && portValue.TryGetInt32(out var parsed) ? parsed : 0;
-        if (host.IsNullOrEmpty() || port is < 1 or > 65535)
+        // The host goes into a share link unescaped: only a real host name or IP address,
+        // never one carrying '?', '#', '@', '/' or a line break that could add parameters.
+        if (host.IsNullOrEmpty() || port is < 1 or > 65535 || !IsPlainHost(host))
+        {
+            return null;
+        }
+        if (addressOverride != null && Uri.CheckHostName(addressOverride) is not (UriHostNameType.IPv4 or UriHostNameType.IPv6))
         {
             return null;
         }

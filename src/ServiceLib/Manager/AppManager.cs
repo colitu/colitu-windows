@@ -57,7 +57,9 @@ public sealed class AppManager
 
     public bool InitApp()
     {
-        if (Utils.HasWritePermission() == false)
+        // Windows builds always keep their data next to the executable in Program Files (the
+        // app runs elevated); a user-writable data folder would let anyone swap the cores.
+        if (!Utils.IsWindows() && Utils.HasWritePermission() == false)
         {
             Environment.SetEnvironmentVariable(Global.LocalAppData, "1", EnvironmentVariableTarget.Process);
         }

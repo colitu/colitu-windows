@@ -50,31 +50,37 @@ public sealed partial class ColituSupportService
     public async Task<ColituSupportConversation?> CreateAsync(string subject, string message, IReadOnlyList<string> files, ColituSupportDiagnostics? diagnostics)
     {
         var payload = new { subject, message, locale = Loc.I.Language, diagnostics };
-        using var response = await _auth.SendAuthorizedRequestAsync(() => Multipart(HttpMethod.Post, "/support/conversations", payload, files));
+        using var response = await _auth.SendAuthorizedRequestAsync(() => Multipart(HttpMethod.Post, "/support/conversations", payload, files), transfer: files.Count > 0);
         return (await _auth.ReadResponseJsonAsync<Envelope<ColituSupportConversation>>(response))?.Data;
     }
 
     public async Task<ColituSupportMessage?> ReplyAsync(string conversationId, string body, IReadOnlyList<string> files)
     {
-        using var response = await _auth.SendAuthorizedRequestAsync(() => Multipart(HttpMethod.Post, $"/support/conversations/{Uri.EscapeDataString(conversationId)}/messages", new { body }, files));
+        using var response = await _auth.SendAuthorizedRequestAsync(() => Multipart(HttpMethod.Post, $"/support/conversations/{Uri.EscapeDataString(conversationId)}/messages", new { body }, files), transfer: files.Count > 0);
         return (await _auth.ReadResponseJsonAsync<Envelope<ColituSupportMessage>>(response))?.Data;
     }
+
+    /// <summary>
+    /// Where opened attachments go. It is in the user's temp folder because the user's own
+    /// (non-elevated) Explorer must be able to open them; see <see cref="DownloadAsync"/>.
+    /// </summary>
+    internal static string DownloadRoot => Path.Combine(Path.GetTempPath(), "ColituSupport");
 
     /// <summary>Downloads an attachment into the temp folder and returns its path.</summary>
     public async Task<string> DownloadAsync(ColituSupportAttachment attachment)
     {
-        using var response = await _auth.SendAuthorizedRequestAsync(() => new HttpRequestMessage(HttpMethod.Get, _auth.ApiUri($"/support/attachments/{Uri.EscapeDataString(attachment.Id)}")));
-        var folder = Path.Combine(Path.GetTempPath(), "ColituSupport");
-        Directory.CreateDirectory(folder);
-        var name = string.Concat(Path.GetFileName(attachment.FileName ?? "file").Split(Path.GetInvalidFileNameChars()));
-        var path = Path.Combine(folder, $"{attachment.Id[..Math.Min(8, attachment.Id.Length)]}-{(name.Length == 0 ? "file" : name)}");
+        using var response = await _auth.SendAuthorizedRequestAsync(() => new HttpRequestMessage(HttpMethod.Get, _auth.ApiUri($"/support/attachments/{Uri.EscapeDataString(attachment.Id)}")), transfer: true);
         if (response.Content.Headers.ContentLength > MaxDownloadBytes)
         {
             throw new InvalidOperationException("Attachment is too large.");
         }
-        await using (var source = await response.Content.ReadAsStreamAsync())
-        await using (var file = File.Create(path))
+        var path = Path.Combine(CreateDownloadFolder(), AttachmentFileName(attachment));
+        try
         {
+            await using var source = await response.Content.ReadAsStreamAsync();
+            // CreateNew in a folder with a random name: an elevated write never follows or
+            // overwrites something prepared in the user-writable temp folder.
+            await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             // The server's size header is not trusted: stop writing past the limit.
             var buffer = new byte[81920];
             long written = 0;
@@ -89,13 +95,88 @@ public sealed partial class ColituSupportService
                 await file.WriteAsync(buffer.AsMemory(0, read));
             }
         }
+        catch
+        {
+            try { File.Delete(path); } catch { }
+            throw;
+        }
         return path;
+    }
+
+    /// <summary>
+    /// The server's file name without folders or invalid characters, prefixed with a cleaned
+    /// id; a type the panel never stores (.exe, .lnk, .hta...) gets ".download" appended so a
+    /// double-click in Explorer can't run it.
+    /// </summary>
+    internal static string AttachmentFileName(ColituSupportAttachment attachment)
+    {
+        var name = string.Concat(Path.GetFileName(attachment.FileName ?? "file").Split(Path.GetInvalidFileNameChars())).Trim().TrimEnd('.');
+        if (name.Length == 0) name = "file";
+        if (name.Length > 120) name = name[^120..];
+        if (!AllowedExtensions.Contains(Path.GetExtension(name).ToLowerInvariant()))
+        {
+            name += ".download";
+        }
+        // The id comes from the server: only letters, digits and '-' reach the file name.
+        var idPart = new string((attachment.Id ?? "").Where(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-').Take(8).ToArray());
+        return $"{(idPart.Length == 0 ? "att" : idPart)}-{name}";
+    }
+
+    private static string CreateDownloadFolder()
+    {
+        var root = DownloadRoot;
+        if (Directory.Exists(root) && new DirectoryInfo(root).Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            // A junction someone put there: remove the link (not its target) and start over.
+            Directory.Delete(root);
+        }
+        Directory.CreateDirectory(root);
+        var folder = Path.Combine(root, Guid.NewGuid().ToString("N")[..12]);
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    /// <summary>Removes downloaded attachments (on sign-out: they belong to the account).</summary>
+    internal static void DeleteDownloads()
+    {
+        try
+        {
+            var root = DownloadRoot;
+            if (!Directory.Exists(root)) return;
+            if (new DirectoryInfo(root).Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                Directory.Delete(root);
+                return;
+            }
+            Directory.Delete(root, recursive: true);
+        }
+        catch
+        {
+            // Best effort: a file may still be open in another program.
+        }
     }
 
     public async Task<byte[]> DownloadBytesAsync(string attachmentId)
     {
-        using var response = await _auth.SendAuthorizedRequestAsync(() => new HttpRequestMessage(HttpMethod.Get, _auth.ApiUri($"/support/attachments/{Uri.EscapeDataString(attachmentId)}")));
-        return await response.Content.ReadAsByteArrayAsync();
+        using var response = await _auth.SendAuthorizedRequestAsync(() => new HttpRequestMessage(HttpMethod.Get, _auth.ApiUri($"/support/attachments/{Uri.EscapeDataString(attachmentId)}")), transfer: true);
+        if (response.Content.Headers.ContentLength > MaxDownloadBytes)
+        {
+            throw new InvalidOperationException("Attachment is too large.");
+        }
+        // Same limit as DownloadAsync, enforced while reading: the size header is not trusted.
+        await using var source = await response.Content.ReadAsStreamAsync();
+        using var memory = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(buffer)) > 0)
+        {
+            if (memory.Length + read > MaxDownloadBytes)
+            {
+                throw new InvalidOperationException("Attachment is too large.");
+            }
+            memory.Write(buffer, 0, read);
+        }
+        return memory.ToArray();
     }
 
     /// <summary>Returns a localized reason when a file cannot be attached, otherwise null.</summary>
@@ -130,6 +211,11 @@ public sealed partial class ColituSupportService
         form.Add(new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"), "payload");
         foreach (var file in files)
         {
+            // Checked again: the file may have grown (a log) or gone since it was picked.
+            if (CheckFile(file) is { } problem)
+            {
+                throw new ColituApiException(System.Net.HttpStatusCode.BadRequest, $"{Path.GetFileName(file)}: {problem}", "SUPPORT_FILE_TYPE");
+            }
             var content = new ByteArrayContent(File.ReadAllBytes(file));
             content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             form.Add(content, "file", Path.GetFileName(file));
@@ -150,7 +236,7 @@ public sealed partial class ColituSupportService
         var errors = new List<string>();
         if (!string.IsNullOrWhiteSpace(vpn.LastError))
         {
-            errors.Add(vpn.LastError!);
+            errors.Add(Redact(vpn.LastError!));
         }
         var server = vpn.ConnectedServer;
         return new ColituSupportDiagnostics
@@ -206,20 +292,50 @@ public sealed partial class ColituSupportService
 
     public static string Redact(string text)
     {
+        // E-mails first: host masking would turn user@example.com into user@<host>.
+        text = Email().Replace(text, "***@***");
         text = ColituLogPrivacy.StripTraffic(text);
+        text = Base64Link().Replace(text, "$1***");
         text = ShareLinkSecret().Replace(text, "$1***@");
         text = BearerToken().Replace(text, "Bearer ***");
+        text = BasicAuth().Replace(text, "Basic ***");
+        text = Jwt().Replace(text, "***");
+        text = UrlCredentials().Replace(text, "$1***@");
+        text = QuerySecret().Replace(text, "$1***");
         return JsonSecret().Replace(text, "$1\"***\"");
     }
 
-    [GeneratedRegex(@"((?:vless|vmess|trojan|hysteria2|hy2|ss|tuic)://)[^@\s/]+@", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"((?:vless|vmess|trojan|hysteria2|hy2|ss|tuic|socks|socks5)://)[^@\s/]+@", RegexOptions.IgnoreCase)]
     private static partial Regex ShareLinkSecret();
 
     [GeneratedRegex(@"Bearer\s+[A-Za-z0-9\-_.=]+", RegexOptions.IgnoreCase)]
     private static partial Regex BearerToken();
 
-    [GeneratedRegex(@"(""(?:password|uuid|token|access_token|refresh_token|private_key)""\s*:\s*)""[^""]*""", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"Basic\s+[A-Za-z0-9+/=]{8,}", RegexOptions.IgnoreCase)]
+    private static partial Regex BasicAuth();
+
+    /// <summary>Bare JSON Web Tokens (access tokens) wherever they appear.</summary>
+    [GeneratedRegex(@"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*")]
+    private static partial Regex Jwt();
+
+    /// <summary>vmess:// and legacy ss:// links that are base64 as a whole (credentials included, no '@').</summary>
+    [GeneratedRegex(@"((?:vmess|ss)://)[A-Za-z0-9+/=_-]{16,}", RegexOptions.IgnoreCase)]
+    private static partial Regex Base64Link();
+
+    [GeneratedRegex(@"(""(?:password|uuid|id|auth|auth_str|psk|token|access_token|refresh_token|private_key|privateKey|publicKey|shortId|short_id)""\s*:\s*)""[^""]*""", RegexOptions.IgnoreCase)]
     private static partial Regex JsonSecret();
+
+    /// <summary>user:password@ in http(s) URLs.</summary>
+    [GeneratedRegex(@"(https?://)[^@\s/]+:[^@\s/]*@", RegexOptions.IgnoreCase)]
+    private static partial Regex UrlCredentials();
+
+    /// <summary>token=, key=, password=, pbk=, sid= ... in links and query strings.</summary>
+    [GeneratedRegex(@"(\b(?:password|pass|pwd|token|access_token|refresh_token|key|auth|code|sig|pbk|sid|uuid)=)[^&\s""]+", RegexOptions.IgnoreCase)]
+    private static partial Regex QuerySecret();
+
+    /// <summary>E-mail addresses; not the user part of a link (vless://id@server), which ShareLinkSecret masks.</summary>
+    [GeneratedRegex(@"(?<![/\w.%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")]
+    private static partial Regex Email();
 
     private sealed class Envelope<T>
     {

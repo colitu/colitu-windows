@@ -15,9 +15,14 @@ public partial class ColituMainWindow
         {
             return;
         }
+        var epoch = _accountEpoch;
         try
         {
             var account = await _auth.LoadAccountAsync();
+            if (epoch != _accountEpoch)
+            {
+                return;
+            }
             var limit = Math.Max(1, account.Subscription?.DeviceLimit ?? 1);
             DevicesTitle.Text = Loc.I.Format("account.devicesTitle", ("used", account.Devices.Count), ("limit", limit));
             DeviceList.ItemsSource = account.Devices
@@ -59,10 +64,9 @@ public partial class ColituMainWindow
 
         try
         {
-            if (device.IsCurrent)
-            {
-                await _vpn.ForgetAccountAsync();
-            }
+            // Removing this computer ends the session; the session-expired handler then
+            // disconnects and forgets the account. Disconnecting first would leave the user
+            // offline (but signed in) whenever the removal itself fails.
             await _auth.RemoveDeviceAsync(device.Id);
             if (!device.IsCurrent)
             {
@@ -141,13 +145,18 @@ public partial class ColituMainWindow
             var update = await _updater.CheckForUpdateAsync(ignoreAttemptCache: !quiet);
             if (update == null && !quiet)
             {
-                ShowToast(Loc.I["settings.upToDate"]);
+                // Offline or a rejected manifest is not "up to date".
+                ShowToast(Loc.I[_updater.LastCheckFailed ? "settings.updateCheckFailed" : "settings.upToDate"], _updater.LastCheckFailed);
             }
         }
         finally
         {
-            CheckUpdatesButton.IsEnabled = true;
-            CheckUpdatesText.Text = Loc.I["settings.checkUpdates"];
+            if (!quiet)
+            {
+                CheckUpdatesButton.IsEnabled = true;
+                // Back to the language-following binding (setting Text replaced it).
+                CheckUpdatesText.SetBinding(TextBlock.TextProperty, new Binding("[settings.checkUpdates]") { Source = Loc.I, Mode = BindingMode.OneWay });
+            }
         }
     }
 

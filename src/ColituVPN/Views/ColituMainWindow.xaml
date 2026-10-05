@@ -221,12 +221,12 @@
                                 </Border>
 
                                 <TextBlock Margin="2,22,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.email}" />
-                                <TextBox x:Name="EmailBox" KeyDown="AuthField_KeyDown" Style="{StaticResource Field}" Tag="{s:T auth.emailHint}" />
+                                <TextBox x:Name="EmailBox" MaxLength="254" KeyDown="AuthField_KeyDown" Style="{StaticResource Field}" Tag="{s:T auth.emailHint}" />
 
                                 <TextBlock Margin="2,16,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.password}" />
                                 <Grid>
-                                    <PasswordBox x:Name="PasswordBox" KeyDown="AuthField_KeyDown" Style="{StaticResource PasswordField}" />
-                                    <TextBox x:Name="PasswordPlainBox" KeyDown="AuthField_KeyDown" Padding="16,0,48,0" Style="{StaticResource Field}" Visibility="Collapsed" />
+                                    <PasswordBox x:Name="PasswordBox" MaxLength="256" KeyDown="AuthField_KeyDown" Style="{StaticResource PasswordField}" />
+                                    <TextBox x:Name="PasswordPlainBox" MaxLength="256" KeyDown="AuthField_KeyDown" Padding="16,0,48,0" Style="{StaticResource Field}" Visibility="Collapsed" />
                                     <Button x:Name="ShowPasswordButton" Margin="0,0,8,0" HorizontalAlignment="Right" Click="ShowPassword_Click" Style="{StaticResource IconButton}" ToolTip="{s:T auth.show}">
                                         <Path Data="{StaticResource IconEye}" Style="{StaticResource Stroke}" />
                                     </Button>
@@ -234,7 +234,7 @@
 
                                 <StackPanel x:Name="RegisterFields" Visibility="Collapsed">
                                     <TextBlock Margin="2,16,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.passwordRepeat}" />
-                                    <PasswordBox x:Name="PasswordRepeatBox" KeyDown="AuthField_KeyDown" Style="{StaticResource PasswordField}" />
+                                    <PasswordBox x:Name="PasswordRepeatBox" MaxLength="256" KeyDown="AuthField_KeyDown" Style="{StaticResource PasswordField}" />
                                     <CheckBox x:Name="TermsCheck" Margin="2,18,0,0" Style="{StaticResource FieldCheck}">
                                         <TextBlock TextWrapping="Wrap">
                                             <Hyperlink Click="TermsLink_Click" Foreground="{StaticResource LilacBrush}" TextDecorations="{x:Null}"><Run Text="{s:T auth.terms}" /></Hyperlink>
@@ -279,15 +279,15 @@
                         <TextBlock Margin="0,24,0,0" Style="{StaticResource H1}" Text="{s:T reset.title}" />
                         <TextBlock x:Name="ResetSubtitle" Margin="0,10,0,0" Style="{StaticResource Muted}" TextWrapping="Wrap" />
                         <TextBlock Margin="2,24,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.email}" />
-                        <TextBox x:Name="ResetEmailBox" KeyDown="ResetField_KeyDown" Style="{StaticResource Field}" Tag="{s:T auth.emailHint}" />
+                        <TextBox x:Name="ResetEmailBox" MaxLength="254" KeyDown="ResetField_KeyDown" Style="{StaticResource Field}" Tag="{s:T auth.emailHint}" />
                         <StackPanel x:Name="ResetCodeFields" Visibility="Collapsed">
                             <TextBlock Margin="2,16,0,8" Style="{StaticResource FieldLabel}" Text="{s:T verify.code}" />
-                            <TextBox x:Name="ResetCodeBox" Height="58" Padding="16,0" FontSize="24" FontWeight="SemiBold" InputMethod.IsInputMethodEnabled="False" KeyDown="ResetField_KeyDown" MaxLength="6" PreviewTextInput="VerifyCode_PreviewTextInput" Style="{StaticResource Field}" TextAlignment="Center" />
+                            <TextBox x:Name="ResetCodeBox" Height="58" Padding="16,0" FontSize="24" FontWeight="SemiBold" InputMethod.IsInputMethodEnabled="False" DataObject.Pasting="VerifyCode_Pasting" KeyDown="ResetField_KeyDown" MaxLength="6" PreviewTextInput="VerifyCode_PreviewTextInput" Style="{StaticResource Field}" TextAlignment="Center" />
                             <TextBlock Margin="2,16,0,8" Style="{StaticResource FieldLabel}" Text="{s:T reset.newPassword}" />
-                            <PasswordBox x:Name="ResetPasswordBox" KeyDown="ResetField_KeyDown" Style="{StaticResource PasswordField}" />
+                            <PasswordBox x:Name="ResetPasswordBox" MaxLength="256" KeyDown="ResetField_KeyDown" Style="{StaticResource PasswordField}" />
                             <TextBlock Margin="2,6,0,0" FontSize="12" Foreground="{StaticResource MutedBrush}" Text="{s:T auth.passwordHint}" />
                             <TextBlock Margin="2,14,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.passwordRepeat}" />
-                            <PasswordBox x:Name="ResetRepeatBox" KeyDown="ResetField_KeyDown" Style="{StaticResource PasswordField}" />
+                            <PasswordBox x:Name="ResetRepeatBox" MaxLength="256" KeyDown="ResetField_KeyDown" Style="{StaticResource PasswordField}" />
                         </StackPanel>
                         <Border x:Name="ResetInfoBox" Margin="0,16,0,0" Padding="14,10" Background="#149F8CFF" BorderBrush="#599F8CFF" BorderThickness="1" CornerRadius="16" Visibility="Collapsed">
                             <TextBlock x:Name="ResetInfoText" FontSize="13" Foreground="{StaticResource LilacBrush}" TextWrapping="Wrap" />

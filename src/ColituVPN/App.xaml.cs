@@ -33,6 +33,10 @@ public partial class App : Application
             return;
         }
 
+        // Any user process can set this variable (HKCU\Environment); the elevated app and its
+        // cores must not inherit it.
+        Environment.SetEnvironmentVariable(Global.LocalAppData, null);
+
         var args = e.Args ?? Array.Empty<string>();
         if (args.Any(t => t == UninstallCleanupArg))
         {

@@ -39,10 +39,20 @@ public sealed class ColituUpdateService
 
     public event Action<ColituUpdateInfo>? UpdateAvailable;
 
+    /// <summary>The installer is about 100 MB; anything far larger is not a Colitu release.</summary>
+    private const long MaxPackageBytes = 512L << 20;
+
+    /// <summary>
+    /// True when the last <see cref="CheckForUpdateAsync"/> could not tell (offline, server error,
+    /// bad signature), so "you have the latest version" would be a guess.
+    /// </summary>
+    public bool LastCheckFailed { get; private set; }
+
     private ColituUpdateService() { }
 
     public async Task<ColituUpdateInfo?> CheckForUpdateAsync(bool ignoreAttemptCache = false)
     {
+        LastCheckFailed = true;
         try
         {
             ClearCompletedAttempt();
@@ -59,6 +69,7 @@ public sealed class ColituUpdateService
                 Logging.SaveLog("ColituUpdateService: release manifest signature is missing or invalid; update ignored");
                 return null;
             }
+            LastCheckFailed = false;
 
             var remoteCode = payload.LatestVersionCode;
             var remoteName = payload.VersionName ?? remoteCode.ToString();
@@ -84,6 +95,7 @@ public sealed class ColituUpdateService
         }
         catch
         {
+            LastCheckFailed = true;
             return null;
         }
     }
@@ -123,6 +135,10 @@ public sealed class ColituUpdateService
         response.EnsureSuccessStatusCode();
 
         var total = response.Content.Headers.ContentLength ?? -1;
+        if (total > MaxPackageBytes)
+        {
+            throw new InvalidOperationException("The update package is larger than any Colitu release.");
+        }
         await using (var source = await response.Content.ReadAsStreamAsync(cancellationToken))
         await using (var dest = File.Create(destPath))
         {
@@ -131,8 +147,13 @@ public sealed class ColituUpdateService
             int read;
             while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
             {
-                await dest.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 downloaded += read;
+                // The size header is not trusted: stop filling the disk past the limit.
+                if (downloaded > MaxPackageBytes)
+                {
+                    throw new InvalidOperationException("The update package is larger than any Colitu release.");
+                }
+                await dest.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
                 if (total > 0)
                 {
                     progress?.Report(new ColituDownloadProgress
@@ -158,7 +179,8 @@ public sealed class ColituUpdateService
             throw new InvalidOperationException("Update file not downloaded.");
         }
 
-        var exePath = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
+        // Assembly.Location is empty in the single-file build.
+        var exePath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "ColituVPN.exe");
         var tempDir = Path.GetDirectoryName(info.LocalPath)!;
         var scriptPath = Path.Combine(tempDir, "apply-update.ps1");
         var logPath = Path.Combine(tempDir, "apply-update.log");
@@ -324,7 +346,10 @@ public sealed class ColituUpdateService
         File.WriteAllText(scriptPath, scriptContent, new UTF8Encoding(false));
         try { File.Delete(logPath); } catch { }
 
-        var startInfo = new ProcessStartInfo("powershell.exe")
+        // By full path: the app runs elevated, and a bare name is also looked up in the
+        // current directory, which may be user-writable.
+        var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        var startInfo = new ProcessStartInfo(powershell)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -372,9 +397,7 @@ public sealed class ColituUpdateService
             var actual = FirstNonEmpty(versionInfo.ProductVersion, versionInfo.FileVersion);
             if (string.IsNullOrWhiteSpace(actual)) return;
 
-            var normalizedActual = actual.Split('+')[0].Trim();
-            var normalizedExpected = expectedVersion.Split('+')[0].Trim();
-            if (!normalizedActual.StartsWith(normalizedExpected, StringComparison.OrdinalIgnoreCase))
+            if (!SameVersion(actual, expectedVersion))
             {
                 File.Delete(filePath);
                 throw new InvalidOperationException($"Downloaded file version is {actual}, but API announced {expectedVersion}. Update link probably points to an old build.");
@@ -388,6 +411,23 @@ public sealed class ColituUpdateService
         {
             // Some installers do not expose product version metadata. SHA256 is still authoritative when provided.
         }
+    }
+
+    /// <summary>
+    /// "2.5.4" matches "2.5.4" and "2.5.4.0" but not "2.5.40" (a prefix test would accept it).
+    /// </summary>
+    internal static bool SameVersion(string actual, string expected)
+    {
+        var a = actual.Split('+')[0].Trim();
+        var e = expected.Split('+')[0].Trim();
+        if (Version.TryParse(a, out var actualVersion) && Version.TryParse(e, out var expectedVersion))
+        {
+            return actualVersion.Major == expectedVersion.Major
+                && actualVersion.Minor == expectedVersion.Minor
+                && Math.Max(0, actualVersion.Build) == Math.Max(0, expectedVersion.Build)
+                && Math.Max(0, actualVersion.Revision) == Math.Max(0, expectedVersion.Revision);
+        }
+        return string.Equals(a, e, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsInstallerPackage(string filePath, string? downloadUrl)

@@ -46,7 +46,7 @@ public static class ColituLatency
         {
             return null;
         }
-        if (address == null || address.AddressFamily != AddressFamily.InterNetwork)
+        if (address == null || address.AddressFamily != AddressFamily.InterNetwork || !IsPublic(address))
         {
             return null;
         }
@@ -61,6 +61,23 @@ public static class ColituLatency
             }
         }
         return best;
+    }
+
+    /// <summary>
+    /// VPN nodes are on the internet: a probe address in loopback, private, CGNAT or
+    /// link-local space (a bad or tampered server list) is never dialled, so the ping
+    /// cannot be turned into a scan of this computer or its local network.
+    /// </summary>
+    internal static bool IsPublic(IPAddress address)
+    {
+        var b = address.GetAddressBytes();
+        if (b.Length != 4) return false;
+        return !(b[0] is 0 or 10 or 127
+            || b[0] >= 224
+            || (b[0] == 100 && b[1] >= 64 && b[1] <= 127)
+            || (b[0] == 169 && b[1] == 254)
+            || (b[0] == 172 && b[1] >= 16 && b[1] <= 31)
+            || (b[0] == 192 && b[1] == 168));
     }
 
     private static async Task<int?> ConnectMsAsync(IPAddress address, int port, int? interfaceIndex)

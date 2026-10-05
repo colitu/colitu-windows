@@ -147,13 +147,29 @@ public partial class ColituMainWindow
 
     private async void Unblock_Click(object sender, RoutedEventArgs e)
     {
-        await _vpn.DisconnectAsync();
+        try
+        {
+            await _vpn.DisconnectAsync();
+            ShowToast(Loc.I["info.disconnected"]);
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.Unblock", ex);
+            ShowToast(Loc.I["err.generic"], true);
+        }
         ApplyStatus();
-        ShowToast(Loc.I["info.disconnected"]);
     }
+
+    private DateTime _lastToggle;
 
     private async Task ToggleConnectionAsync()
     {
+        // A double click would start a connection and cancel it again right away.
+        if (DateTime.UtcNow - _lastToggle < TimeSpan.FromMilliseconds(600))
+        {
+            return;
+        }
+        _lastToggle = DateTime.UtcNow;
         var status = _vpn.Status;
         if (status is ColituVpnStatus.Connected or ColituVpnStatus.Connecting or ColituVpnStatus.Reconnecting)
         {
@@ -440,9 +456,12 @@ public partial class ColituMainWindow
 
     private async Task SavePreferencesAsync(ColituVpnPreferences preferences)
     {
+        // In TUN mode the kill switch also decides the core's strict routing, so it needs a
+        // reconnect too (in proxy mode it only acts when the tunnel drops).
         var tunnelSettingsChanged = preferences.ConnectionMode != _vpn.Preferences.ConnectionMode
             || preferences.DnsLeakProtectionEnabled != _vpn.Preferences.DnsLeakProtectionEnabled
-            || preferences.AdBlockEnabled != _vpn.Preferences.AdBlockEnabled;
+            || preferences.AdBlockEnabled != _vpn.Preferences.AdBlockEnabled
+            || (preferences.IsTunMode && preferences.KillSwitchEnabled != _vpn.Preferences.KillSwitchEnabled);
         try
         {
             await _vpn.UpdatePreferencesAsync(preferences);

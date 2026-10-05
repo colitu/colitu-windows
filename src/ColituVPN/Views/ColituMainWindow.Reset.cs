@@ -89,7 +89,7 @@ public partial class ColituMainWindow
             StartResetCooldown();
             ApplyResetState();
             ShowResetInfo(Loc.I.Format("reset.sent", ("email", email)));
-            Dispatcher.BeginInvoke(() => ResetCodeBox.Focus(), DispatcherPriority.Input);
+            _ = Dispatcher.BeginInvoke(() => ResetCodeBox.Focus(), DispatcherPriority.Input);
         }
         catch (ColituApiException ex)
         {

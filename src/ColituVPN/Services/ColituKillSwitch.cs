@@ -4,17 +4,19 @@ namespace v2rayN.Services;
 
 /// <summary>
 /// Kill switch built on the Windows Filtering Platform, the same technique as
-/// the WireGuard client. While engaged, outbound connections are blocked
-/// except for the VPN core, this app, loopback (the local proxy), the TUN
-/// adapter, the local network and DHCP. Filters live in a dynamic WFP session:
+/// the WireGuard client. While engaged, outbound connections and incoming
+/// connections (a listening torrent client would answer from the real address)
+/// are blocked except for the VPN core, this app, loopback (the local proxy),
+/// the TUN adapter, the local network and DHCP. Filters live in a dynamic WFP session:
 /// Windows removes them when the session closes, so a crash can never leave
 /// the computer permanently offline.
 /// </summary>
 public sealed class ColituKillSwitch
 {
-    private static readonly Guid SublayerKey = new("7c1f5f3e-2f7a-4d0c-9b8e-c01170b1a5e1");
     private static readonly Guid LayerConnectV4 = new("c38d57d1-05a7-4c33-904f-7fbceee60e82");
     private static readonly Guid LayerConnectV6 = new("4a72393b-319f-44bc-84c3-ba54dcb3b6b4");
+    private static readonly Guid LayerRecvAcceptV4 = new("e1cd9fe7-f4b5-4273-96c0-592e487b8650");
+    private static readonly Guid LayerRecvAcceptV6 = new("a3b42c97-9f04-4672-b87e-cee9c483257f");
     private static readonly Guid ConditionAppId = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
     private static readonly Guid ConditionFlags = new("632ce23b-5167-435c-86d7-e903684aa80c");
     private static readonly Guid ConditionRemoteAddress = new("b235ae9a-1d64-49b8-a44c-5ff3d9095045");
@@ -59,6 +61,9 @@ public sealed class ColituKillSwitch
 
     private readonly object _gate = new();
     private IntPtr _engine;
+    // A new key for every engagement: a second Colitu running in another Windows session
+    // (fast user switching) would otherwise fail with FWP_E_ALREADY_EXISTS.
+    private Guid _sublayerKey;
 
     public bool IsEngaged
     {
@@ -94,17 +99,18 @@ public sealed class ColituKillSwitch
             try
             {
                 Check(FwpmTransactionBegin0(engine, 0), "FwpmTransactionBegin0");
+                _sublayerKey = Guid.NewGuid();
                 var sublayer = new FwpmSublayer0
                 {
-                    subLayerKey = SublayerKey,
+                    subLayerKey = _sublayerKey,
                     displayData = memory.Display("Colitu VPN kill switch"),
                     weight = 0xFFFF
                 };
                 Check(FwpmSubLayerAdd0(engine, ref sublayer, IntPtr.Zero), "FwpmSubLayerAdd0");
 
-                foreach (var layer in new[] { LayerConnectV4, LayerConnectV6 })
+                foreach (var layer in new[] { LayerConnectV4, LayerConnectV6, LayerRecvAcceptV4, LayerRecvAcceptV6 })
                 {
-                    var v6 = layer == LayerConnectV6;
+                    var v6 = layer == LayerConnectV6 || layer == LayerRecvAcceptV6;
 
                     AddFilter(engine, memory, layer, 15, ActionPermit, "Permit loopback",
                         Condition(ConditionFlags, MatchFlagsAllSet, TypeUInt32, (IntPtr)FlagIsLoopback));
@@ -174,14 +180,14 @@ public sealed class ColituKillSwitch
         conditionValue = new FwpValue0 { type = type, value = value }
     };
 
-    private static void AddFilter(IntPtr engine, NativeMemory memory, Guid layer, byte weight, uint action, string name, params FwpmFilterCondition0[] conditions)
+    private void AddFilter(IntPtr engine, NativeMemory memory, Guid layer, byte weight, uint action, string name, params FwpmFilterCondition0[] conditions)
     {
         var filter = new FwpmFilter0
         {
             filterKey = Guid.NewGuid(),
             displayData = memory.Display(name),
             layerKey = layer,
-            subLayerKey = SublayerKey,
+            subLayerKey = _sublayerKey,
             weight = new FwpValue0 { type = TypeUInt8, value = (IntPtr)weight },
             numFilterConditions = (uint)conditions.Length,
             filterCondition = conditions.Length == 0 ? IntPtr.Zero : memory.Array(conditions),

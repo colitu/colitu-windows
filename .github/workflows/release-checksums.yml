@@ -16,28 +16,41 @@ on:
     paths: ['.github/workflows/release-checksums.yml']
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # Read-only: this job runs the third-party SBOM action, so it never holds a token that
+  # could change the release files.
   checksums:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ github.token }}
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Pick the release
         id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, never pasted into the script: a tag name can
+          # carry shell syntax.
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          tag="${{ github.event.release.tag_name || inputs.tag }}"
+          tag="$TAG"
           if [ -z "$tag" ]; then tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"; fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "Unexpected tag: $tag"; exit 1; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Release: $tag"
 
       - name: Download the release files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
           mkdir -p release
-          gh release download "${{ steps.release.outputs.tag }}" --repo "$GITHUB_REPOSITORY" --dir release --pattern '*.exe' --pattern '*.apk' --pattern '*.aab' --pattern '*.zip' --skip-existing
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release --pattern '*.exe' --pattern '*.apk' --pattern '*.aab' --pattern '*.zip' --skip-existing
           ls -la release
 
       - name: Write SHA256SUMS
@@ -51,7 +64,7 @@ jobs:
           test -s SHA256SUMS
 
       - name: Source SBOM (SPDX)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           path: .
           format: spdx-json
@@ -59,8 +72,31 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      - name: Keep the files for the upload job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata
+          path: |
+            release/SHA256SUMS
+            release/*.spdx.json
+          retention-days: 1
+
+  attach:
+    needs: checksums
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata
+          path: release
+
       - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.checksums.outputs.tag }}
         run: |
           files="release/SHA256SUMS"
           for sbom in release/*.spdx.json; do if [ -e "$sbom" ]; then files="$files $sbom"; fi; done
-          gh release upload "${{ steps.release.outputs.tag }}" $files --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$TAG" $files --repo "$GITHUB_REPOSITORY" --clobber

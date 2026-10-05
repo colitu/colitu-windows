@@ -974,7 +974,9 @@ public class Utils
 
     public static string StartupPath()
     {
-        if (Environment.GetEnvironmentVariable(Global.LocalAppData) == "1")
+        // Never on Windows: the app runs elevated, and a variable any user process can set
+        // (HKCU\Environment) would move its cores and configs into a user-writable folder.
+        if (!IsWindows() && Environment.GetEnvironmentVariable(Global.LocalAppData) == "1")
         {
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ColituVPN");
         }

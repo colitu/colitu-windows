@@ -6,7 +6,7 @@
 #if GetEnv("COLITU_APP_VERSION") != ""
   #define MyAppVersion GetEnv("COLITU_APP_VERSION")
 #else
-  #define MyAppVersion "2.5.2"
+  #define MyAppVersion "2.5.4"
 #endif
 
 #if GetEnv("COLITU_PUBLISH_DIR") != ""
@@ -82,7 +82,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExeName} /F"; Flags: runhidden waituntilterminated; RunOnceId: "KillColituVPN"
+Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /F"; Flags: runhidden waituntilterminated; RunOnceId: "KillColituVPN"
 ; Hands the system proxy back and removes the sign-in task; without it an uninstall while
 ; connected leaves every browser pointing at a local proxy that no longer exists.
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--colitu-cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "ColituCleanup"
@@ -98,10 +98,27 @@ Type: filesandordirs; Name: "{app}\guiUpdates"
 Type: filesandordirs; Name: "{app}\bin"
 
 [Code]
-function InitializeSetup(): Boolean;
+// Runs once the user clicked Install (not when the wizard opens): cancelling the wizard
+// leaves a running connection alone.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM {#MyAppExeName} /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := True;
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#MyAppExeName} /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
+
+// The app and its cores run elevated (and at sign-in without a UAC prompt), so ordinary
+// users must not be able to change them. Program Files already ensures that; a folder
+// picked elsewhere (C:\Colitu VPN, D:\Apps) would inherit "Authenticated Users: Modify".
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    Exec(ExpandConstant('{sys}\icacls.exe'),
+      '"' + ExpandConstant('{app}') + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
 end;

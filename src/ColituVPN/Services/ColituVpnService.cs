@@ -30,8 +30,12 @@ public sealed class ColituVpnService
     private Timer? _watchdog;
     private readonly ColituKillSwitch _killSwitch = new();
     private int _watchdogTicks;
-    private int _probeFailures;
-    private bool _autoReconnecting;
+    private volatile bool _autoReconnecting;
+    private int _autoReconnectBusy;
+    private bool _proxyModeWarned;
+    /// <summary>Status saved by the previous run, before this run overwrote the state file.</summary>
+    private ColituVpnStatus _previousRunStatus;
+    private readonly object _stateLock = new();
     private bool _userDisconnected;
     private CancellationTokenSource? _connectCts;
     private bool _otherVpnWarned;
@@ -39,7 +43,8 @@ public sealed class ColituVpnService
     private readonly Dictionary<string, DateTimeOffset> _stalledTransports = new(StringComparer.OrdinalIgnoreCase);
     private string? _activeTransport;
     /// <summary>Names and addresses of the current VPN server; the only hosts kept readable in core log lines.</summary>
-    private readonly HashSet<string> _serverHosts = new(StringComparer.OrdinalIgnoreCase);
+    // Replaced, never changed in place: core output threads read it while a connect adds to it.
+    private volatile HashSet<string> _serverHosts = new(StringComparer.OrdinalIgnoreCase);
     private int _watchdogBusy;
 
     /// <summary>The transport the current tunnel runs on (hysteria2, vless-reality, …); for support diagnostics.</summary>
@@ -143,6 +148,8 @@ public sealed class ColituVpnService
         _connectCts?.Cancel();
         var attempt = _connectCts = new CancellationTokenSource();
         var token = attempt.Token;
+        _serverHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var killSwitchEngagedHere = false;
         SetStatus(ColituVpnStatus.Connecting);
         LastError = null;
         _lastCoreMessage = null;
@@ -152,7 +159,7 @@ public sealed class ColituVpnService
         try
         {
             LogConnection($"Connecting to {(server == null ? "best server" : $"server id={server.Id}, name={server.Name}")}");
-            if (Preferences.IsTunMode && !_otherVpnWarned && ColituNetwork.CompetingVpnAdapter() is { } other)
+            if (EffectiveTunMode && !_otherVpnWarned && ColituNetwork.CompetingVpnAdapter() is { } other)
             {
                 _otherVpnWarned = true;
                 LogConnection($"Another VPN adapter holds a default route: {other}");
@@ -169,6 +176,17 @@ public sealed class ColituVpnService
             var connected = FindServer(config.ServerId) ?? config.Server ?? server;
             var profiles = await ImportConfigAsync(config, connected);
             await PrepareConnectionModeAsync(config.Server?.CountryCode ?? connected?.CountryCode);
+            if (EffectiveTunMode && Preferences.KillSwitchEnabled && !_killSwitch.IsEngaged)
+            {
+                // Before the TUN adapter comes up: from its first second Windows must not ask the
+                // network adapter's DNS server. The core and this app stay allowed out.
+                killSwitchEngagedHere = EngageKillSwitch("TUN connecting");
+                if (!killSwitchEngagedHere)
+                {
+                    // No WFP filters: let sing-box's strict route keep DNS inside the tunnel instead.
+                    _config.TunModeItem.StrictRoute = true;
+                }
+            }
             try
             {
                 await StartFirstWorkingProfileAsync(profiles, config, connected, token);
@@ -185,13 +203,13 @@ public sealed class ColituVpnService
             }
             ConnectedServer = connected;
             ConnectedAt = DateTimeOffset.Now;
-            _probeFailures = 0;
             ApplyKillSwitchForConnectedTunnel();
             SetStatus(ColituVpnStatus.Connected);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             LogConnection("Connection attempt cancelled");
+            if (killSwitchEngagedHere) ReleaseKillSwitch("connection attempt cancelled");
             await StopCoreAsync();
             await SysProxyHandler.UpdateSysProxy(_config, true);
             await RestoreProxyPreferenceAsync();
@@ -204,6 +222,9 @@ public sealed class ColituVpnService
         {
             LastError = FriendlyConnectionError(ex);
             LogConnection($"Connection failed: {ex}");
+            // Engaged by this attempt (not by a lost tunnel): a failed manual connect must not
+            // leave the computer offline.
+            if (killSwitchEngagedHere) ReleaseKillSwitch("connection failed");
             await StopCoreAsync();
             await SysProxyHandler.UpdateSysProxy(_config, true);
             await RestoreProxyPreferenceAsync();
@@ -226,7 +247,8 @@ public sealed class ColituVpnService
     /// </summary>
     private async Task<ColituVpnConfigResponse> FetchConfigAsync(ColituVpnServer? server, CancellationToken token)
     {
-        var cacheKey = server?.Id ?? "auto";
+        // Bound to the account: settings cached for one account never connect another one.
+        var cacheKey = $"{ColituAuthService.Instance.CurrentUser?.Id ?? "-"}|{server?.Id ?? "auto"}";
         var watch = Stopwatch.StartNew();
         // The previous tunnel may just have stopped: never reuse a connection opened over its route.
         ResetDirectConnections();
@@ -429,13 +451,13 @@ public sealed class ColituVpnService
         try
         {
             await EnsureCoreReadyAsync();
-            var wasActive = _session.Status is ColituVpnStatus.Connected or ColituVpnStatus.Connecting or ColituVpnStatus.Reconnecting;
+            var wasActive = _previousRunStatus is ColituVpnStatus.Connected or ColituVpnStatus.Connecting or ColituVpnStatus.Reconnecting;
             if (!wasActive && _config.SystemProxyItem.SysProxyType != ESysProxyType.ForcedChange)
             {
                 return;
             }
 
-            LogConnection($"Recovering after unclean exit (saved status={_session.Status}, proxy={_config.SystemProxyItem.SysProxyType})");
+            LogConnection($"Recovering after unclean exit (saved status={_previousRunStatus}, proxy={_config.SystemProxyItem.SysProxyType})");
             KillOrphanCoreProcesses();
             await SysProxyHandler.UpdateSysProxy(_config, true);
             if (_config.SystemProxyItem.SysProxyType == ESysProxyType.ForcedChange)
@@ -464,9 +486,9 @@ public sealed class ColituVpnService
         {
             // Without this the watchdog sees the stopped core as a dropped tunnel and starts
             // reconnecting (proxy, TUN) while Windows is shutting down.
+            // The watchdog keeps running: shutdown can still be cancelled (an app refusing to
+            // close), and the next connection must be watched again. It ignores a stopped tunnel.
             _userDisconnected = true;
-            _watchdog?.Dispose();
-            _watchdog = null;
             _connectCts?.Cancel();
             SetStatus(ColituVpnStatus.Disconnected);
             Task.Run(async () =>
@@ -487,17 +509,21 @@ public sealed class ColituVpnService
     /// <summary>Stops the tunnel on sign-out and forgets cached connection settings.</summary>
     public async Task ForgetAccountAsync()
     {
-        if (Status is ColituVpnStatus.Connected or ColituVpnStatus.Connecting or ColituVpnStatus.Reconnecting)
+        // Also after a failed reconnect (Error): the kill switch may still hold the internet
+        // closed and the background retry loop must stop.
+        if (Status != ColituVpnStatus.Disconnected || _killSwitch.IsEngaged)
         {
             await DisconnectAsync();
         }
+        DeleteConfigCache();
         try
         {
-            if (File.Exists(ConfigCachePath())) File.Delete(ConfigCachePath());
+            // The imported transports carry this account's server credentials.
+            await ConfigHandler.RemoveServersViaSubid(_config, ColituSubId, false);
         }
-        catch
+        catch (Exception ex)
         {
-            // Best effort.
+            Logging.SaveLog("ColituVpnService.ForgetAccountAsync", ex);
         }
         _lastServers = [];
         SelectedServer = null;
@@ -561,7 +587,6 @@ public sealed class ColituVpnService
         var probe = await ProbeThroughLocalProxyAsync(port, 1);
         if (probe.Success || Status != ColituVpnStatus.Connected || _autoReconnecting)
         {
-            _probeFailures = 0;
             return;
         }
         // One quick confirmation so a single slow page does not trigger a reconnect.
@@ -591,20 +616,40 @@ public sealed class ColituVpnService
     private async Task VerifyAfterResumeAsync()
     {
         await Task.Delay(TimeSpan.FromSeconds(4));
-        if (Status != ColituVpnStatus.Connected || _autoReconnecting)
+        // One check at a time with the watchdog, or both could start a reconnect.
+        if (Interlocked.Exchange(ref _watchdogBusy, 1) == 1)
         {
             return;
         }
-        var probe = await ProbeThroughLocalProxyAsync(AppManager.Instance.GetLocalPort(EInboundProtocol.socks));
-        if (!probe.Success)
+        try
         {
-            LogConnection($"Tunnel check after resume failed: {probe.Detail}");
-            await OnTunnelLostAsync();
+            if (Status != ColituVpnStatus.Connected || _autoReconnecting)
+            {
+                return;
+            }
+            var probe = await ProbeThroughLocalProxyAsync(AppManager.Instance.GetLocalPort(EInboundProtocol.socks));
+            if (!probe.Success && Status == ColituVpnStatus.Connected)
+            {
+                LogConnection($"Tunnel check after resume failed: {probe.Detail}");
+                await OnTunnelLostAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituVpnService.VerifyAfterResume", ex);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _watchdogBusy, 0);
         }
     }
 
     private async Task AutoReconnectAsync()
     {
+        if (Interlocked.Exchange(ref _autoReconnectBusy, 1) == 1)
+        {
+            return;
+        }
         _autoReconnecting = true;
         try
         {
@@ -613,11 +658,16 @@ public sealed class ColituVpnService
                 try
                 {
                     await ReconnectAsync();
-                    Notice?.Invoke("info.reconnected");
+                    if (Status == ColituVpnStatus.Connected)
+                    {
+                        Notice?.Invoke("info.reconnected");
+                    }
                     return;
                 }
                 catch (ColituPlanRequiredException)
                 {
+                    // Nothing to reconnect to until the plan is renewed: don't keep the internet closed.
+                    ReleaseKillSwitch("no active plan");
                     Notice?.Invoke("err.noPlan");
                     return;
                 }
@@ -649,19 +699,32 @@ public sealed class ColituVpnService
                 try
                 {
                     await ReconnectAsync();
-                    Notice?.Invoke("info.reconnected");
+                    if (Status == ColituVpnStatus.Connected)
+                    {
+                        Notice?.Invoke("info.reconnected");
+                    }
+                    return;
+                }
+                catch (ColituPlanRequiredException)
+                {
+                    ReleaseKillSwitch("no active plan");
+                    Notice?.Invoke("err.noPlan");
                     return;
                 }
                 catch (Exception ex)
                 {
                     LogConnection($"Background reconnect failed: {ex.Message}");
-                    SetStatus(ColituVpnStatus.Error);
+                    if (!_userDisconnected)
+                    {
+                        SetStatus(ColituVpnStatus.Error);
+                    }
                 }
             }
         }
         finally
         {
             _autoReconnecting = false;
+            Interlocked.Exchange(ref _autoReconnectBusy, 0);
         }
     }
 
@@ -678,7 +741,7 @@ public sealed class ColituVpnService
     private void ApplyKillSwitchForConnectedTunnel()
     {
         var preferences = Preferences;
-        if (preferences.KillSwitchEnabled && preferences.IsTunMode)
+        if (preferences.KillSwitchEnabled && EffectiveTunMode)
         {
             EngageKillSwitch("TUN session");
         }
@@ -768,6 +831,19 @@ public sealed class ColituVpnService
     }
 
     private static string ConfigCachePath() => ColituHardening.UserConfigPath("colitu-config-cache.bin");
+
+    /// <summary>Drops the cached connection settings (they carry the account's server credentials).</summary>
+    internal static void DeleteConfigCache()
+    {
+        try
+        {
+            if (File.Exists(ConfigCachePath())) File.Delete(ConfigCachePath());
+        }
+        catch
+        {
+            // Best effort.
+        }
+    }
 
     /// <summary>The cache shared by every Windows user before 2.4.1; only an offline fallback, so it is dropped.</summary>
     private static void DeleteLegacyConfigCache()
@@ -955,10 +1031,12 @@ public sealed class ColituVpnService
                 token.ThrowIfCancellationRequested();
                 var (candidate, profile) = profiles[index];
                 var isLast = index == profiles.Count - 1;
+                var hosts = new HashSet<string>(_serverHosts, StringComparer.OrdinalIgnoreCase);
                 foreach (var host in new[] { profile.Address, profile.Sni })
                 {
-                    if (host.IsNotEmpty()) _serverHosts.Add(host);
+                    if (host.IsNotEmpty()) hosts.Add(host);
                 }
+                _serverHosts = hosts;
                 if (await ConfigHandler.SetDefaultServerIndex(_config, profile.IndexId) != 0)
                 {
                     throw new InvalidOperationException("Imported server could not be selected as default.");
@@ -1007,6 +1085,33 @@ public sealed class ColituVpnService
         }
     }
 
+    /// <summary>
+    /// TUN mode, either chosen or forced because the system proxy can't reach the user's apps
+    /// (see <see cref="ProxyModeUnusable"/>).
+    /// </summary>
+    private bool EffectiveTunMode => Preferences.IsTunMode || ColituHardening.ElevatedAsAnotherUser;
+
+    /// <summary>
+    /// A standard account approves the UAC prompt with an administrator's password, so the app
+    /// runs as that administrator: the system proxy would be set for the administrator, and the
+    /// signed-in user's browsers would go out unprotected while the app says "connected". Only
+    /// TUN mode (which covers the whole computer) protects them then.
+    /// </summary>
+    private bool ProxyModeUnusable()
+    {
+        if (!ColituHardening.ElevatedAsAnotherUser)
+        {
+            return false;
+        }
+        if (!_proxyModeWarned && !Preferences.IsTunMode)
+        {
+            _proxyModeWarned = true;
+            LogConnection("Running as another Windows account than the signed-in user: using TUN mode instead of the system proxy");
+            Notice?.Invoke("warn.proxyOtherUser");
+        }
+        return true;
+    }
+
     private async Task PrepareConnectionModeAsync(string? serverCountry)
     {
         EnsureAdministratorForVpn();
@@ -1030,7 +1135,7 @@ public sealed class ColituVpnService
     private async Task ApplyRuntimePreferencesAsync(ColituVpnPreferences preferences)
     {
         preferences = preferences.Normalize();
-        var tun = preferences.IsTunMode;
+        var tun = preferences.IsTunMode || ProxyModeUnusable();
         _config.TunModeItem.EnableTun = tun;
         _config.TunModeItem.AutoRoute = tun;
         // With the kill switch on, its WFP filters stop DNS and other traffic leaving outside the
@@ -1647,6 +1752,8 @@ public sealed class ColituVpnService
                 return;
             }
             _session = JsonSerializer.Deserialize<ColituVpnSession>(File.ReadAllText(StatePath()), _jsonOptions) ?? new();
+            // SaveState below writes this run's status (Disconnected); recovery needs the old one.
+            _previousRunStatus = _session.Status;
             if (_session.PreferencesMigration < 1)
             {
                 // 1.6.5 made Kill Switch and Auto-Connect on by default; apply once to states saved by older builds.
@@ -1678,14 +1785,21 @@ public sealed class ColituVpnService
             SelectionMode = _session.SelectionMode,
             Preferences = _session.Preferences.Normalize()
         };
-        try
+        // The UI and the watchdog (thread pool) both save; one writer at a time, never a torn file.
+        lock (_stateLock)
         {
-            File.WriteAllText(StatePath(), JsonSerializer.Serialize(_session, _jsonOptions));
-        }
-        catch (Exception ex)
-        {
-            // A locked or unwritable file must not break connecting or status updates.
-            Logging.SaveLog("ColituVpnService.SaveState", ex);
+            var temp = $"{StatePath()}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllText(temp, JsonSerializer.Serialize(_session, _jsonOptions));
+                File.Move(temp, StatePath(), overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                // A locked or unwritable file must not break connecting or status updates.
+                Logging.SaveLog("ColituVpnService.SaveState", ex);
+                try { File.Delete(temp); } catch { }
+            }
         }
     }
 

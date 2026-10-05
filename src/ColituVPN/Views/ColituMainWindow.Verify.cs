@@ -58,7 +58,8 @@ public partial class ColituMainWindow
             StopVerifyWatch();
             return;
         }
-        if (_verifyBusy || DateTime.UtcNow - _lastVerifyCheck < TimeSpan.FromSeconds(5))
+        // Not while the window is hidden in the tray or minimized: Activated checks on return.
+        if (_verifyBusy || !IsVisible || WindowState == WindowState.Minimized || DateTime.UtcNow - _lastVerifyCheck < TimeSpan.FromSeconds(5))
         {
             return;
         }
@@ -79,7 +80,7 @@ public partial class ColituMainWindow
             ShowAuth();
             ShowAuthError(Loc.I["auth.expired"]);
         }
-        catch (ColituApiException ex) when ((int)ex.StatusCode is >= 400 and < 500 && ex.StatusCode != HttpStatusCode.TooManyRequests)
+        catch (ColituApiException ex) when (IsAccountRejection(ex))
         {
             // Confirmed, but this computer could not be added (device limit,
             // trial already used here, no plan): same outcome as typing the code.
@@ -111,18 +112,19 @@ public partial class ColituMainWindow
     }
 
     /// <summary>Codes pasted from the e-mail may carry spaces or a dash ("123 456").</summary>
+    /// <summary>Verification and password reset code boxes: keep only the six digits of a paste.</summary>
     private void VerifyCode_Pasting(object sender, DataObjectPastingEventArgs e)
     {
         e.CancelCommand();
-        if (e.DataObject.GetData(DataFormats.UnicodeText) is not string text)
+        if (sender is not TextBox box || e.DataObject.GetData(DataFormats.UnicodeText) is not string text)
         {
             return;
         }
         var digits = new string(text.Where(char.IsAsciiDigit).Take(6).ToArray());
         if (digits.Length > 0)
         {
-            VerifyCodeBox.Text = digits;
-            VerifyCodeBox.CaretIndex = digits.Length;
+            box.Text = digits;
+            box.CaretIndex = digits.Length;
         }
     }
 
@@ -193,7 +195,8 @@ public partial class ColituMainWindow
         {
             ShowVerifyError(ex.Message);
             VerifyCodeBox.SelectAll();
-            VerifyCodeBox.Focus();
+            // After the finally block has enabled the box again.
+            _ = Dispatcher.BeginInvoke(() => VerifyCodeBox.Focus(), DispatcherPriority.Input);
         }
         catch (ColituApiException ex) when (ex.Terminal || ex.ErrorCode is "SESSION_EXPIRED")
         {
@@ -202,7 +205,7 @@ public partial class ColituMainWindow
             ShowAuth();
             ShowAuthError(Loc.I["auth.expired"]);
         }
-        catch (ColituApiException ex)
+        catch (ColituApiException ex) when (IsAccountRejection(ex))
         {
             // The address is confirmed, but this computer could not be added
             // (device limit, trial already used here, no plan): explain it on the
@@ -211,6 +214,12 @@ public partial class ColituMainWindow
             await _auth.LogoutAsync();
             ShowAuth();
             ShowAuthError(ex.Message);
+        }
+        catch (ColituApiException ex)
+        {
+            // A server error, a rate limit or a failed token refresh: the account is still
+            // fine, so stay here and let the user try again.
+            ShowVerifyError(ex.Message);
         }
         catch (Exception ex)
         {
@@ -260,10 +269,25 @@ public partial class ColituMainWindow
     {
         _resendTimer?.Stop();
         StopVerifyWatch();
-        await _auth.LogoutAsync();
+        try
+        {
+            await _auth.LogoutAsync();
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.VerifyOtherAccount", ex);
+        }
         AuthLoginTab.IsChecked = true;
         ShowAuth();
     }
+
+    /// <summary>
+    /// Answers that mean this account can't be used on this computer (as opposed to a server
+    /// error, a rate limit or a failed refresh, after which the user simply tries again).
+    /// </summary>
+    private static bool IsAccountRejection(ColituApiException ex) => ex.ErrorCode is
+        "DEVICE_LIMIT_REACHED" or "DEVICE_LIMIT_EXCEEDED" or "TRIAL_ALREADY_USED" or "REGION_NOT_SUPPORTED"
+        or "ENTITLEMENT_INACTIVE" or "ENTITLEMENT_EXPIRED" or "DEVICE_REVOKED" or "DEVICE_NOT_FOUND";
 
     private void StartResendCooldown(int seconds)
     {

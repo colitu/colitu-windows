@@ -12,7 +12,7 @@ public partial class CoreConfigV2rayService
             var inbound = BuildInbound(_config.Inbound.First(), EInboundProtocol.socks, true);
 
             if (!context.IsTunEnabled
-                || (context.IsTunEnabled && _node.Address != Global.Loopback && _node.Port != listenPort))
+                || (context.IsTunEnabled && (_node.Address != Global.Loopback || _node.Port != listenPort)))
             {
                 _coreConfig.inbounds.Add(inbound);
 

@@ -28,6 +28,7 @@ public partial class ColituMainWindow
     private bool _supportBusy;
     private bool _supportSelecting;
     private bool _supportPolling;
+    private bool _supportForcePending;
 
     // ── Polling and the badge ──────────────────────────────────────────────
     private void StartSupportPolling()
@@ -60,7 +61,9 @@ public partial class ColituMainWindow
     private void UpdateSupportPolling()
     {
         _supportThreadTimer ??= NewTimer(TimeSpan.FromSeconds(5), async () => await PollSupportThreadAsync());
-        if (_page == "support" && _supportCurrent != null && SupportThread.Visibility == Visibility.Visible)
+        // Not while the window sits in the tray or is minimized: the badge poll covers that.
+        if (_page == "support" && _supportCurrent != null && SupportThread.Visibility == Visibility.Visible
+            && IsVisible && WindowState != WindowState.Minimized)
         {
             _supportThreadTimer.Start();
         }
@@ -84,9 +87,17 @@ public partial class ColituMainWindow
             return;
         }
 
+        var epoch = _accountEpoch;
         try
         {
             var unread = await _support.UnreadAsync();
+            if (epoch != _accountEpoch)
+            {
+                // Signed out while the request ran: the answer belongs to the previous account.
+                return;
+            }
+            // Support may have been switched off and on again in the panel.
+            SupportLauncher.Visibility = Visibility.Visible;
             if (_supportUnread >= 0 && unread > _supportUnread)
             {
                 NotifySupportReply();
@@ -174,9 +185,15 @@ public partial class ColituMainWindow
             SupportListSpinner.Visibility = Visibility.Visible;
             SupportListEmpty.Visibility = Visibility.Collapsed;
         }
+        var epoch = _accountEpoch;
         try
         {
-            _supportConversations = (await _support.ListAsync())
+            var list = await _support.ListAsync();
+            if (epoch != _accountEpoch)
+            {
+                return;
+            }
+            _supportConversations = list
                 .OrderByDescending(item => item.LastMessageAt)
                 .ToList();
             _supportUnread = _supportConversations.Sum(item => item.Unread);
@@ -359,8 +376,15 @@ public partial class ColituMainWindow
     private async Task PollSupportThreadAsync(bool forceScroll = false)
     {
         var current = _supportCurrent;
-        if (current == null || _supportPolling)
+        if (current == null)
         {
+            return;
+        }
+        if (_supportPolling)
+        {
+            // A timer poll is running; a forced refresh (another thread opened, a reply sent)
+            // runs right after it instead of being dropped.
+            _supportForcePending |= forceScroll;
             return;
         }
 
@@ -405,6 +429,11 @@ public partial class ColituMainWindow
         finally
         {
             _supportPolling = false;
+            if (_supportForcePending)
+            {
+                _supportForcePending = false;
+                _ = PollSupportThreadAsync(forceScroll: true);
+            }
         }
     }
 
@@ -549,16 +578,21 @@ public partial class ColituMainWindow
             if (!_supportImages.TryGetValue(id, out var bitmap))
             {
                 var bytes = await _support.DownloadBytesAsync(id);
-                bitmap = new BitmapImage();
-                using (var stream = new MemoryStream(bytes))
+                // Decoded off the UI thread: a large photo would freeze the window.
+                bitmap = await Task.Run(() =>
                 {
-                    bitmap.BeginInit();
-                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                    bitmap.DecodePixelWidth = 600;
-                    bitmap.StreamSource = stream;
-                    bitmap.EndInit();
-                }
-                bitmap.Freeze();
+                    var decoded = new BitmapImage();
+                    using (var stream = new MemoryStream(bytes))
+                    {
+                        decoded.BeginInit();
+                        decoded.CacheOption = BitmapCacheOption.OnLoad;
+                        decoded.DecodePixelWidth = 600;
+                        decoded.StreamSource = stream;
+                        decoded.EndInit();
+                    }
+                    decoded.Freeze();
+                    return decoded;
+                });
                 _supportImages[id] = bitmap;
             }
             target.Source = bitmap;
@@ -615,7 +649,7 @@ public partial class ColituMainWindow
         {
             var path = await _support.DownloadAsync(attachment);
             // Open with Explorer selecting the file: nothing downloaded is executed directly.
-            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+            ColituShell.SelectFile(path);
         }
         catch (Exception ex)
         {
@@ -682,7 +716,7 @@ public partial class ColituMainWindow
         {
             Multiselect = true,
             Title = Loc.I["support.attach"],
-            Filter = "Images, PDF, text, archives|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.pdf;*.txt;*.log;*.zip;*.json;*.gz"
+            Filter = $"{Loc.I["support.fileTypes"]}|{string.Join(';', ColituSupportService.AllowedExtensions.Select(extension => "*" + extension))}"
         };
         if (dialog.ShowDialog(this) != true)
         {
@@ -716,7 +750,7 @@ public partial class ColituMainWindow
             var row = new StackPanel { Orientation = Orientation.Horizontal };
             row.Children.Add(new TextBlock
             {
-                Text = $"{System.IO.Path.GetFileName(file)}  ·  {FormatSize(new FileInfo(file).Length)}",
+                Text = $"{System.IO.Path.GetFileName(file)}  ·  {FormatSize(FileSize(file))}",
                 FontSize = 12.5,
                 MaxWidth = 260,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -757,14 +791,19 @@ public partial class ColituMainWindow
         spinner.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private static string FormatSize(long bytes)
+    private static string FormatSize(long bytes) => FormatBytes(bytes);
+
+    /// <summary>The file may have been moved or deleted since it was picked.</summary>
+    private static long FileSize(string file)
     {
-        return bytes switch
+        try
         {
-            >= 1 << 20 => $"{bytes / 1048576.0:0.#} MB",
-            >= 1 << 10 => $"{bytes / 1024.0:0} KB",
-            _ => $"{bytes} B"
-        };
+            return new FileInfo(file).Length;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 }
 

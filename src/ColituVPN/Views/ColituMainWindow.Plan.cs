@@ -26,8 +26,14 @@ public partial class ColituMainWindow
         PlanRefreshSpinner.Visibility = Visibility.Visible;
         try
         {
-            await RefreshDataAsync();
-            ShowToast(Loc.I["plan.refreshed"]);
+            if (await RefreshDataAsync())
+            {
+                ShowToast(Loc.I["plan.refreshed"]);
+            }
+            else
+            {
+                ShowToast(Loc.I["err.network"], true);
+            }
         }
         finally
         {

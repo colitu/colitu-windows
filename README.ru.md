@@ -14,8 +14,8 @@ Xray и sing-box и управляет системным прокси, TUN-ад
 
 | | |
 |---|---|
-| Приложение | `Colitu VPN` (`ColituVPN.exe`), WPF на .NET 8 |
-| Версия | `2.5.2` (`src/Directory.Build.props`) |
+| Приложение | `Colitu VPN` (`ColituVPN.exe`), WPF на .NET 10 |
+| Версия | `2.5.4` (`src/Directory.Build.props`) |
 | ОС | Windows 10 / 11, x64 |
 | Языки | русский, английский, турецкий |
 | Сайт | <https://colitu.com> · [загрузки](https://colitu.com/downloads/windows) |
@@ -87,11 +87,11 @@ design/                   макеты интерфейса
 
 ## Сборка
 
-Нужны Windows, .NET 8 SDK с компонентом Windows Desktop и
+Нужны Windows, .NET 10 SDK с компонентом Windows Desktop и
 [Inno Setup 6](https://jrsoftware.org/isinfo.php) для установщика.
 
 ```powershell
-git clone https://github.com/cyberlexs/colitu-windows.git
+git clone https://github.com/colitu/colitu-windows.git
 cd colitu-windows\src
 dotnet build ColituVPN.sln -c Release
 dotnet test ColituVPN.sln -c Release
@@ -111,7 +111,7 @@ dotnet test ColituVPN.sln -c Release
 Затем выполните:
 
 ```powershell
-pwsh .\scripts\build-installer.ps1 -Version 2.5.2
+pwsh .\scripts\build-installer.ps1 -Version 2.5.4
 ```
 
 В `artifacts/installer/` появятся `ColituVPN-Setup-<версия>-x64.exe`, его копия

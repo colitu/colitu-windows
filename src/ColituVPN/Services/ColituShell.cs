@@ -39,12 +39,41 @@ public static class ColituShell
     public static bool OpenFolder(string path)
     {
         var full = Path.GetFullPath(path);
-        var root = Path.GetFullPath(Utils.StartupPath());
-        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(full))
+        if (!IsInside(full, Utils.StartupPath()) || !Directory.Exists(full))
         {
             return false;
         }
         return StartViaExplorer(full);
+    }
+
+    /// <summary>Shows a downloaded support attachment selected in Explorer (never runs it).</summary>
+    public static bool SelectFile(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (!IsInside(full, ColituSupportService.DownloadRoot) || !File.Exists(full))
+        {
+            return false;
+        }
+        try
+        {
+            var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+            // File names never contain quotes, so the path can be quoted as is.
+            using var _ = Process.Start(new ProcessStartInfo(explorer, $"/select,\"{full}\"") { UseShellExecute = false });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituShell.SelectFile", ex);
+            return false;
+        }
+    }
+
+    /// <summary>True when <paramref name="full"/> is <paramref name="root"/> or below it (not a sibling like root2).</summary>
+    internal static bool IsInside(string full, string root)
+    {
+        var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        return string.Equals(full, normalizedRoot, StringComparison.OrdinalIgnoreCase)
+            || full.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool StartViaExplorer(string target)
