@@ -80,7 +80,8 @@ public static class ColituLatency
             || (b[0] == 192 && b[1] == 168));
     }
 
-    private static async Task<int?> ConnectMsAsync(IPAddress address, int port, int? interfaceIndex)
+    /// <summary>TCP connect time in ms over the adapter <paramref name="interfaceIndex"/>; null when it fails or times out.</summary>
+    internal static async Task<int?> ConnectMsAsync(IPAddress address, int port, int? interfaceIndex, int timeoutMs = TimeoutMs)
     {
         try
         {
@@ -98,7 +99,7 @@ public static class ColituLatency
                     // Not pinned: the measurement still works, possibly through the tunnel.
                 }
             }
-            using var timeout = new CancellationTokenSource(TimeoutMs);
+            using var timeout = new CancellationTokenSource(timeoutMs);
             var watch = Stopwatch.StartNew();
             await socket.ConnectAsync(new IPEndPoint(address, port), timeout.Token);
             watch.Stop();

@@ -100,7 +100,19 @@ public partial class ColituMainWindow
         ShowView(LoadingView);
         _ = CheckForUpdatesAsync(quiet: true);
         await _vpn.RecoverFromPreviousRunAsync();
-        var state = await _auth.InitializeAsync();
+        var initialize = _auth.InitializeAsync();
+        // A slow or unreachable panel (common from Russia) kept the loading screen up and the
+        // auto-connect waiting for up to a minute. With a saved session, continue after a few
+        // seconds with the cached account; the check finishes in the background.
+        if (_auth.HasSession && await Task.WhenAny(initialize, Task.Delay(StartupPanelWait)) != initialize)
+        {
+            Logging.SaveLog($"ColituMainWindow | Panel did not answer within {StartupPanelWait.TotalSeconds:0} s at startup; starting with the saved account");
+            _ = initialize.ContinueWith(task => Dispatcher.BeginInvoke(async () => await OnLateStartupStateAsync(task.Result)),
+                CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+            await EnterAppAsync(offline: true);
+            return;
+        }
+        var state = await initialize;
         if (state == ColituStartupState.VerificationRequired)
         {
             ShowVerify(codeJustSent: false);
@@ -119,6 +131,34 @@ public partial class ColituMainWindow
         await EnterAppAsync(state == ColituStartupState.Offline);
     }
 
+    private static readonly TimeSpan StartupPanelWait = TimeSpan.FromSeconds(6);
+
+    /// <summary>The startup check answered after the app had opened with the saved account.</summary>
+    private async Task OnLateStartupStateAsync(ColituStartupState state)
+    {
+        try
+        {
+            switch (state)
+            {
+                case ColituStartupState.SignedOut:
+                    await OnSessionExpiredAsync();
+                    break;
+                case ColituStartupState.VerificationRequired:
+                    ShowVerify(codeJustSent: false);
+                    break;
+                case ColituStartupState.SignedIn when _offline && _auth.HasSession:
+                    _offline = false;
+                    _refresh.Interval = TimeSpan.FromMinutes(5);
+                    await RefreshDataAsync(includeAccount: false);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.OnLateStartupStateAsync", ex);
+        }
+    }
+
     private async Task EnterAppAsync(bool offline)
     {
         _offline = offline;
@@ -132,6 +172,18 @@ public partial class ColituMainWindow
 
         // A previous offline spell may have left the 20 s retry interval behind.
         _refresh.Interval = offline ? TimeSpan.FromSeconds(20) : TimeSpan.FromMinutes(5);
+        _refresh.Start();
+        StartSupportPolling();
+
+        // Before the server list and usage are loaded: the tunnel must not wait for the panel
+        // (up to 40 s more when it is slow). A plan that has run out is reported by the connect.
+        // Not awaited: sign-in, verification and reset screens finish right away instead of
+        // waiting (with a spinner) until the tunnel is up.
+        if (!_planRequired || offline)
+        {
+            _ = AutoConnectAsync();
+        }
+
         if (offline)
         {
             ShowToast(Loc.I["home.offline"], true);
@@ -139,15 +191,6 @@ public partial class ColituMainWindow
         else
         {
             await RefreshDataAsync(includeAccount: false);
-        }
-        _refresh.Start();
-        StartSupportPolling();
-
-        if (!_planRequired || offline)
-        {
-            // Not awaited: sign-in, verification and reset screens finish right away instead
-            // of waiting (with a spinner) until the tunnel is up.
-            _ = AutoConnectAsync();
         }
     }
 

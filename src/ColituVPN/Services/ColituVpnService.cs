@@ -39,7 +39,7 @@ public sealed class ColituVpnService
     private bool _userDisconnected;
     private CancellationTokenSource? _connectCts;
     private bool _otherVpnWarned;
-    /// <summary>Transports that stalled under load recently, kept last until this time.</summary>
+    /// <summary>Transports that stalled recently, per server ("serverId|protocol"), kept last until this time.</summary>
     // Written by the watchdog (thread pool) and read while the UI connects.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _stalledTransports = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Health checks in a row that carried no traffic through the tunnel.</summary>
@@ -49,6 +49,15 @@ public sealed class ColituVpnService
     /// <summary>The tunnel's resolver answered once this session, so a silence means it hangs (not that the check can't work).</summary>
     private bool _dnsCheckWorks;
     private Timer? _networkChangeDebounce;
+    /// <summary>"No internet" was shown for the current outage; not repeated every check.</summary>
+    private bool _offlineNoticeShown;
+    /// <summary>Path checks in a row that found no internet at all.</summary>
+    private int _offlineVerdicts;
+    /// <summary>"Waiting for the network" was logged for the current outage.</summary>
+    private bool _waitingForNetwork;
+    /// <summary>DNS recoveries (a restart, then a reconnect) in the current 10-minute window.</summary>
+    private int _dnsRecoveries;
+    private DateTimeOffset _dnsRecoveryWindowStart;
     private string? _activeTransport;
     /// <summary>Names and addresses of the current VPN server; the only hosts kept readable in core log lines.</summary>
     // Replaced, never changed in place: core output threads read it while a connect adds to it.
@@ -140,6 +149,9 @@ public sealed class ColituVpnService
         _failedChecks = 0;
         _failedDnsChecks = 0;
         _dnsCheckWorks = false;
+        _offlineNoticeShown = false;
+        _offlineVerdicts = 0;
+        _waitingForNetwork = false;
         _watchdogTicks = 0;
     }
 
@@ -181,6 +193,12 @@ public sealed class ColituVpnService
         try
         {
             LogConnection($"Connecting to {(server == null ? "best server" : $"server id={server.Id}, name={server.Name}")}");
+            // Wi-Fi just reconnected (or the PC woke up): give the adapter a moment to get its
+            // address and route instead of failing every transport in a row.
+            for (var waited = 0; waited < 20 && !(ColituNetwork.HasPhysicalNetwork() && ColituNetwork.HasDefaultRoute()); waited++)
+            {
+                await Task.Delay(1000, token);
+            }
             if (EffectiveTunMode && !_otherVpnWarned && ColituNetwork.CompetingVpnAdapter() is { } other)
             {
                 _otherVpnWarned = true;
@@ -264,22 +282,23 @@ public sealed class ColituVpnService
     }
 
     /// <summary>
-    /// Asks the panel for fresh connection settings. When the panel cannot be
-    /// reached (offline, blocked, down) the last settings received for the same
-    /// choice are reused until their offline grace period ends.
+    /// Asks the panel for fresh connection settings. When the panel is slow or cannot be
+    /// reached (offline, blocked, down) the last settings received for the same choice are
+    /// used until their offline grace period ends ("best server": any cached server).
     /// An automatic reconnect (<paramref name="quick"/>) skips the preference call (the choice
-    /// did not change) and waits at most 3 s for the panel before it uses the cached settings:
-    /// the panel's answer can move it to a healthy node, but it took up to 8 s.
+    /// did not change) and waits at most 3 s for the panel, a user's connect 10 s.
     /// </summary>
     private async Task<ColituVpnConfigResponse> FetchConfigAsync(ColituVpnServer? server, CancellationToken token, bool quick = false)
     {
         // Bound to the account: settings cached for one account never connect another one.
         var cacheKey = $"{ColituAuthService.Instance.CurrentUser?.Id ?? "-"}|{server?.Id ?? "auto"}";
-        var quickFallback = quick ? LoadCachedConfig(cacheKey) : null;
+        var fallback = LoadCachedConfig(cacheKey) ?? (server == null ? LoadAnyCachedConfig() : null);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
-        if (quickFallback != null)
+        if (fallback != null)
         {
-            budget.CancelAfter(TimeSpan.FromSeconds(3));
+            // With settings to fall back on, a slow panel (up to 20 s per request from Russia)
+            // must not hold the connection: 3 s for an automatic reconnect, 10 s otherwise.
+            budget.CancelAfter(quick ? TimeSpan.FromSeconds(3) : TimeSpan.FromSeconds(10));
         }
         var watch = Stopwatch.StartNew();
         // The previous tunnel may just have stopped: never reuse a connection opened over its route.
@@ -297,15 +316,10 @@ public sealed class ColituVpnService
             SaveCachedConfig(cacheKey, config);
             return config;
         }
-        catch (Exception ex) when (!token.IsCancellationRequested && quickFallback != null && (ex is OperationCanceledException || IsNetworkFailure(ex)))
+        catch (Exception ex) when (!token.IsCancellationRequested && fallback != null && (ex is OperationCanceledException || IsNetworkFailure(ex)))
         {
-            LogConnection($"Panel did not answer within {watch.ElapsedMilliseconds} ms ({ex.GetType().Name}); reconnecting with the cached settings for {cacheKey}");
-            return quickFallback;
-        }
-        catch (Exception ex) when (!token.IsCancellationRequested && IsNetworkFailure(ex) && LoadCachedConfig(cacheKey) is { } cached)
-        {
-            LogConnection($"Panel unreachable after {watch.ElapsedMilliseconds} ms ({ex.GetType().Name}); using cached connection settings for {cacheKey}");
-            return cached;
+            LogConnection($"Panel did not answer in {watch.ElapsedMilliseconds} ms ({ex.GetType().Name}); using cached connection settings (server {fallback.ServerId}, revision {fallback.Revision})");
+            return fallback;
         }
     }
 
@@ -391,15 +405,25 @@ public sealed class ColituVpnService
             return false;
         }
 
+        // At sign-in a USB Wi-Fi adapter can take well over a minute to get its network.
         var waited = Stopwatch.StartNew();
         while (!NetworkInterface.GetIsNetworkAvailable() || !ColituNetwork.HasDefaultRoute())
         {
-            if (waited.Elapsed > TimeSpan.FromSeconds(45) || _userDisconnected)
+            if (waited.Elapsed > TimeSpan.FromMinutes(3) || _userDisconnected)
             {
                 LogConnection("Auto-connect skipped: no network");
                 return false;
             }
             await Task.Delay(1000);
+            if (GetStatus() is ColituVpnStatus.Connected or ColituVpnStatus.Connecting or ColituVpnStatus.Reconnecting)
+            {
+                // The user connected meanwhile.
+                return false;
+            }
+        }
+        if (waited.Elapsed > TimeSpan.FromSeconds(2))
+        {
+            LogConnection($"Network available after {waited.ElapsedMilliseconds} ms; auto-connecting");
         }
 
         for (var round = 1; round <= 2; round++)
@@ -408,6 +432,12 @@ public sealed class ColituVpnService
             {
                 await ConnectSavedAsync();
                 return Status == ColituVpnStatus.Connected;
+            }
+            catch (ColituPlanRequiredException)
+            {
+                // Auto-connect now starts before the plan is loaded; a second try can't help.
+                LogConnection("Auto-connect skipped: no active plan");
+                return false;
             }
             catch (Exception ex)
             {
@@ -623,7 +653,7 @@ public sealed class ColituVpnService
         }
         if (!CoreManager.Instance.IsCoreRunning)
         {
-            await RecoverTunnelAsync("VPN core stopped unexpectedly");
+            await RecoverTunnelAsync("VPN core stopped unexpectedly", coreStopped: true);
             return;
         }
 
@@ -641,6 +671,9 @@ public sealed class ColituVpnService
         if (probe.Success)
         {
             _failedChecks = 0;
+            _offlineVerdicts = 0;
+            _offlineNoticeShown = false;
+            _waitingForNetwork = false;
             // Every 30 s, and on every check while the resolver is silent.
             if (_failedDnsChecks > 0 || _watchdogTicks % 15 == 0)
             {
@@ -660,30 +693,165 @@ public sealed class ColituVpnService
     }
 
     /// <summary>
-    /// The tunnel stopped carrying traffic. Gentlest step first: without any network there is
-    /// nothing to fix, so wait for it; otherwise restart the core on the same server and transport
-    /// (a second or two, fresh connections, current adapter); only when that does not help,
-    /// reconnect from scratch (next transport, the panel's fallback node).
+    /// The tunnel stopped carrying traffic. First look outside the tunnel which part broke:
+    /// with no internet at all nothing can be fixed (keep the tunnel, tell the user, wait); when
+    /// only the server is unreachable a restart can't help (reconnect, the panel may move to
+    /// another node); otherwise restart the core on the same server and transport (a second or
+    /// two), and only when that does not help, reconnect from scratch (next transport).
     /// </summary>
-    private async Task RecoverTunnelAsync(string reason)
+    private async Task RecoverTunnelAsync(string reason, bool coreStopped = false)
     {
         if (!ColituNetwork.HasPhysicalNetwork())
         {
-            LogConnection($"{reason}; no network adapter is connected, waiting for the network");
+            if (!_waitingForNetwork)
+            {
+                _waitingForNetwork = true;
+                LogConnection($"{reason}; no network adapter is connected, waiting for the network");
+            }
             return;
         }
+        _waitingForNetwork = false;
         LogConnection(reason);
+        if (!coreStopped)
+        {
+            var path = await DiagnosePathAsync();
+            if (!CanHeal())
+            {
+                return;
+            }
+            // Three "offline" verdicts in a row (about a minute) while an adapter is connected: the
+            // check itself may be what is blocked, so the restart goes ahead anyway.
+            if (path == ColituPathState.Offline && ++_offlineVerdicts < 3)
+            {
+                LogConnection("No internet outside the tunnel either; keeping the tunnel and waiting for the connection to return");
+                if (!_offlineNoticeShown)
+                {
+                    _offlineNoticeShown = true;
+                    Notice?.Invoke("warn.noInternet");
+                }
+                return;
+            }
+            _offlineVerdicts = 0;
+            if (path == ColituPathState.ServerUnreachable)
+            {
+                // Not the transport's fault: no stall mark, and fresh settings from the panel
+                // (which can move to a healthy node) instead of the cached ones for this server.
+                LogConnection("The server does not answer outside the tunnel either; reconnecting");
+                await OnTunnelLostAsync(fresh: true);
+                return;
+            }
+        }
         if (await TryRestartCoreAsync(reason) || _userDisconnected)
         {
             return;
         }
         if (_activeTransport != null)
         {
-            _stalledTransports[_activeTransport] = DateTimeOffset.UtcNow.AddMinutes(10);
+            _stalledTransports[StallKey(ConnectedServer?.Id, _activeTransport)] = DateTimeOffset.UtcNow.AddMinutes(10);
             LogConnection($"Transport {_activeTransport} stalled; it goes last for the next 10 minutes");
         }
         LogConnection("Restarting the core did not bring traffic back; reconnecting");
         await OnTunnelLostAsync();
+    }
+
+    /// <summary>A Russian and a foreign address that accept TCP connections (Yandex DNS, Cloudflare).</summary>
+    // Port 443 only: sing-box's strict route refuses port 53 outside the tunnel ("access denied").
+    private static readonly (string Name, IPAddress Address, int Port)[] PathReferences =
+    [
+        ("yandex-dns", IPAddress.Parse("77.88.8.8"), 443),
+        ("yandex", IPAddress.Parse("77.88.55.242"), 443),
+        ("cloudflare", IPAddress.Parse("1.1.1.1"), 443),
+        ("google", IPAddress.Parse("8.8.8.8"), 443),
+    ];
+
+    /// <summary>
+    /// TCP connects outside the tunnel (pinned to the physical adapter) to the server and to
+    /// <see cref="PathReferences"/>; logged, so a drop can be told apart afterwards too.
+    /// </summary>
+    private async Task<ColituPathState> DiagnosePathAsync()
+    {
+        try
+        {
+            var index = ColituNetwork.PhysicalInterfaceIndex();
+            if (index == null)
+            {
+                // Not pinned (PPPoE, mobile broadband) the connects would go through the dead tunnel.
+                return ColituPathState.Reachable;
+            }
+            var server = await CurrentServerEndpointAsync();
+            var serverCheck = server is { } endpoint
+                ? ColituLatency.ConnectMsAsync(endpoint.Address, endpoint.Port, index, 3000)
+                : Task.FromResult<int?>(null);
+            var references = PathReferences.Select(item => ColituLatency.ConnectMsAsync(item.Address, item.Port, index, 3000)).ToArray();
+            await Task.WhenAll(references.Append(serverCheck));
+            var answers = PathReferences.Select((item, i) => (item.Name, Ms: references[i].Result)).ToList();
+            if (server != null)
+            {
+                answers.Insert(0, ("server", serverCheck.Result));
+            }
+            LogConnection("Direct path check (outside the tunnel): "
+                + string.Join(", ", answers.Select(item => $"{item.Name}={(item.Ms is { } ms ? $"{ms} ms" : "no answer")}")));
+            return ClassifyPath(server != null, serverCheck.Result, references.Select(task => task.Result));
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituVpnService.DiagnosePath", ex);
+            return ColituPathState.Reachable;
+        }
+    }
+
+    /// <summary>
+    /// Whether any <see cref="PathReferences"/> address answers outside the tunnel (pinned to the
+    /// physical adapter). True when that can't be checked (no physical adapter index).
+    /// </summary>
+    private static async Task<bool> InternetReachableDirectAsync()
+    {
+        if (!ColituNetwork.HasPhysicalNetwork())
+        {
+            return false;
+        }
+        var index = ColituNetwork.PhysicalInterfaceIndex();
+        if (index == null)
+        {
+            return true;
+        }
+        var checks = PathReferences.Select(item => ColituLatency.ConnectMsAsync(item.Address, item.Port, index, 2500)).ToList();
+        while (checks.Count > 0)
+        {
+            var done = await Task.WhenAny(checks);
+            if (await done != null)
+            {
+                return true;
+            }
+            checks.Remove(done);
+        }
+        return false;
+    }
+
+    internal static ColituPathState ClassifyPath(bool serverKnown, int? serverMs, IEnumerable<int?> referenceMs)
+    {
+        var internet = referenceMs.Any(ms => ms != null) || (serverKnown && serverMs != null);
+        if (!internet)
+        {
+            return ColituPathState.Offline;
+        }
+        return serverKnown && serverMs == null ? ColituPathState.ServerUnreachable : ColituPathState.Reachable;
+    }
+
+    /// <summary>
+    /// The current server's address and the TCP port of its transport. Null for Hysteria2: it
+    /// is UDP, and it is chosen exactly where TCP to the server may be blocked, so a TCP check
+    /// would call a working server unreachable.
+    /// </summary>
+    private async Task<IPEndPoint?> CurrentServerEndpointAsync()
+    {
+        var profile = await ConfigHandler.GetDefaultServer(_config);
+        if (profile == null || profile.ConfigType == EConfigType.Hysteria2
+            || !IPAddress.TryParse(profile.Address, out var address) || !ColituLatency.IsPublic(address))
+        {
+            return null;
+        }
+        return profile.Port is > 0 and < 65536 ? new IPEndPoint(address, profile.Port) : null;
     }
 
     /// <summary>
@@ -697,19 +865,28 @@ public sealed class ColituVpnService
         {
             return true;
         }
+        var token = CancellationToken.None;
         try
         {
             if (Status != ColituVpnStatus.Connected || _userDisconnected)
             {
                 return true;
             }
+            // Disconnect, a server switch and Windows shutting down cancel it like a connect.
+            var attempt = _connectCts = new CancellationTokenSource();
+            token = attempt.Token;
             SetStatus(ColituVpnStatus.Reconnecting);
             LogConnection($"Restarting the VPN core on the same server ({reason})");
             _lastCoreMessage = null;
             await StopCoreAsync();
             ResetDirectConnections();
-            await ReloadCoreAsync();
-            var probe = await VerifyConnectionActiveAsync(ConnectedServer, 2);
+            await ReloadCoreAsync(token);
+            var probe = await VerifyConnectionActiveAsync(ConnectedServer, 2, token);
+            if (token.IsCancellationRequested || _userDisconnected)
+            {
+                // The user's action, waiting for the lock, takes it from here.
+                return true;
+            }
             if (!probe.Success)
             {
                 return false;
@@ -719,6 +896,16 @@ public sealed class ColituVpnService
             SetStatus(ColituVpnStatus.Connected);
             LogConnection("VPN core restarted; traffic flows again");
             Notice?.Invoke("info.reconnected");
+            return true;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            LogConnection("VPN core restart cancelled");
+            if (_userDisconnected)
+            {
+                // Windows is shutting down (or the user disconnected): no core may stay behind.
+                await StopCoreAsync();
+            }
             return true;
         }
         catch (Exception ex)
@@ -770,9 +957,43 @@ public sealed class ColituVpnService
             return;
         }
         _failedDnsChecks = 0;
-        if (!await TryRestartCoreAsync("tunnel DNS stopped answering") && !_userDisconnected)
+        // Per 10 minutes: a restart, then a reconnect; after that only wait, so a resolver that
+        // keeps failing can't restart the tunnel every minute.
+        var now = DateTimeOffset.UtcNow;
+        if (now - _dnsRecoveryWindowStart > TimeSpan.FromMinutes(10))
         {
-            LogConnection("Restarting the core did not bring DNS back; reconnecting");
+            _dnsRecoveryWindowStart = now;
+            _dnsRecoveries = 0;
+        }
+        if (++_dnsRecoveries > 2)
+        {
+            if (_dnsRecoveries == 3)
+            {
+                LogConnection("Tunnel DNS keeps failing; no further restarts for a while");
+            }
+            return;
+        }
+        if (_dnsRecoveries == 1)
+        {
+            if (!await TryRestartCoreAsync("tunnel DNS stopped answering"))
+            {
+                if (!_userDisconnected)
+                {
+                    await OnTunnelLostAsync();
+                }
+                return;
+            }
+            // The restart's HTTP probe sends names to the server and never asks this resolver.
+            if (_userDisconnected || Status != ColituVpnStatus.Connected
+                || await ColituNetwork.TunnelDnsAnswersAsync(TimeSpan.FromSeconds(5)) != false)
+            {
+                return;
+            }
+            _dnsRecoveries = 2;
+        }
+        if (CanHeal())
+        {
+            LogConnection("Tunnel DNS still does not answer; reconnecting");
             await OnTunnelLostAsync();
         }
     }
@@ -813,7 +1034,8 @@ public sealed class ColituVpnService
         }
     }
 
-    private async Task OnTunnelLostAsync()
+    /// <param name="fresh">Ask the panel for settings first: the server itself is unreachable, so the cached ones point at it.</param>
+    private async Task OnTunnelLostAsync(bool fresh = false)
     {
         if (_userDisconnected)
         {
@@ -823,7 +1045,7 @@ public sealed class ColituVpnService
         {
             Notice?.Invoke("info.killSwitch");
         }
-        await AutoReconnectAsync();
+        await AutoReconnectAsync(fresh);
     }
 
     private async Task VerifyAfterResumeAsync()
@@ -857,7 +1079,7 @@ public sealed class ColituVpnService
         }
     }
 
-    private async Task AutoReconnectAsync()
+    private async Task AutoReconnectAsync(bool fresh = false)
     {
         if (Interlocked.Exchange(ref _autoReconnectBusy, 1) == 1)
         {
@@ -871,7 +1093,7 @@ public sealed class ColituVpnService
                 try
                 {
                     // First quickly (cached settings if the panel is slow); then fresh ones from the panel.
-                    await ReconnectAsync(quick: attempt == 1);
+                    await ReconnectAsync(quick: attempt == 1 && !fresh);
                     if (Status == ColituVpnStatus.Connected)
                     {
                         Notice?.Invoke("info.reconnected");
@@ -937,8 +1159,8 @@ public sealed class ColituVpnService
         }
         finally
         {
-            _autoReconnecting = false;
             Interlocked.Exchange(ref _autoReconnectBusy, 0);
+            _autoReconnecting = false;
         }
     }
 
@@ -1028,6 +1250,20 @@ public sealed class ColituVpnService
             && config.Candidates.Count > 0
             ? config
             : null;
+    }
+
+    /// <summary>
+    /// "Best server" with the panel unreachable and nothing cached for it (from Russia the panel
+    /// is sometimes unreachable for minutes): any server this account connected to before beats
+    /// no connection at all. A server the user picked is never swapped for another one.
+    /// </summary>
+    private ColituVpnConfigResponse? LoadAnyCachedConfig()
+    {
+        var prefix = $"{ColituAuthService.Instance.CurrentUser?.Id ?? "-"}|";
+        return ReadConfigCache()
+            .Where(item => item.Key.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(item => LoadCachedConfig(item.Key))
+            .FirstOrDefault(config => config != null);
     }
 
     private Dictionary<string, ColituVpnConfigResponse> ReadConfigCache()
@@ -1160,7 +1396,7 @@ public sealed class ColituVpnService
 
         var latency = await MeasureTransportLatencyAsync(ordered);
         ordered = ordered
-            .OrderBy(item => TransportRank(item.Candidate.Protocol, latency.GetValueOrDefault(item.Candidate.Protocol, -1), StalledRecently(item.Candidate.Protocol)))
+            .OrderBy(item => TransportRank(item.Candidate.Protocol, latency.GetValueOrDefault(item.Candidate.Protocol, -1), StalledRecently(config.ServerId ?? server?.Id, item.Candidate.Protocol)))
             .ThenBy(item => latency.GetValueOrDefault(item.Candidate.Protocol, int.MaxValue))
             .ToList();
         LogConnection($"Transport order: {string.Join(" > ", ordered.Select(item => $"{item.Candidate.Protocol}({LatencyText(latency, item.Candidate.Protocol)})"))}");
@@ -1198,6 +1434,13 @@ public sealed class ColituVpnService
 
     private static async Task<int> TcpConnectMsAsync(string address, int port)
     {
+        // Pinned to the physical adapter: during a reconnect the old tunnel's routes can still be
+        // in place, and a connect through them timed the dying tunnel (1.3-2.2 s or "unreachable"
+        // for every transport) instead of the server, which picked the wrong transport first.
+        if (IPAddress.TryParse(address, out var ip) && ColituLatency.IsPublic(ip))
+        {
+            return await ColituLatency.ConnectMsAsync(ip, port, ColituNetwork.PhysicalInterfaceIndex()) ?? -1;
+        }
         try
         {
             using var client = new TcpClient();
@@ -1246,8 +1489,11 @@ public sealed class ColituVpnService
         return rank;
     }
 
-    private bool StalledRecently(string protocol) =>
-        _stalledTransports.TryGetValue(protocol, out var until) && until > DateTimeOffset.UtcNow;
+    private bool StalledRecently(string? serverId, string protocol) =>
+        _stalledTransports.TryGetValue(StallKey(serverId, protocol), out var until) && until > DateTimeOffset.UtcNow;
+
+    /// <summary>A transport blocked on one server says nothing about the same transport on another.</summary>
+    private static string StallKey(string? serverId, string protocol) => $"{serverId ?? "-"}|{protocol}";
 
     /// <summary>
     /// Starts the core with each candidate transport until traffic flows through
@@ -1289,12 +1535,21 @@ public sealed class ColituVpnService
                         _activeTransport = candidate.Protocol;
                         return;
                     }
+                    // Without internet every transport fails: say so instead of blaming (and marking)
+                    // each one in turn. 2026-10-05: a connect while Wi-Fi was off marked all of them,
+                    // and the next server then started with Shadowsocks.
+                    if (!_credentialsRefused && !await InternetReachableDirectAsync())
+                    {
+                        observations.Clear();
+                        LogConnection("No internet outside the tunnel either; not trying the other transports");
+                        throw new ColituConnectException(Loc.I["warn.noInternet"]);
+                    }
                     // A transport that carried nothing goes last on the next attempts too (UDP blocked on
                     // this network), so a reconnect does not wait for it again. Refused credentials are
                     // a server still applying new ones, not a property of the transport.
                     if (!_credentialsRefused)
                     {
-                        _stalledTransports[candidate.Protocol] = DateTimeOffset.UtcNow.AddMinutes(10);
+                        _stalledTransports[StallKey(config.ServerId ?? server?.Id, candidate.Protocol)] = DateTimeOffset.UtcNow.AddMinutes(10);
                     }
                     if (isLast)
                     {
@@ -1302,7 +1557,7 @@ public sealed class ColituVpnService
                         throw new ColituConnectException(Loc.I["err.unreachable"]);
                     }
                 }
-                catch (Exception ex) when (!isLast && ex is not OperationCanceledException)
+                catch (Exception ex) when (!isLast && ex is not (OperationCanceledException or ColituConnectException))
                 {
                     observations.Add(new ColituProtocolObservation { Protocol = candidate.Protocol, Reachable = false });
                     LogConnection($"Transport {candidate.Protocol} failed: {ex.Message}");
@@ -2054,6 +2309,17 @@ public sealed class ColituVpnService
     private static string StatePath() => Utils.GetConfigPath("colitu-vpn-state.json");
 
     private sealed record ColituTrafficProbeResult(bool Success, string Detail, int? LatencyMs = null);
+}
+
+/// <summary>What a direct check outside the tunnel found when the tunnel stopped carrying traffic.</summary>
+public enum ColituPathState
+{
+    /// <summary>Internet and server answer: the transport stalled.</summary>
+    Reachable,
+    /// <summary>The internet works but the server does not answer.</summary>
+    ServerUnreachable,
+    /// <summary>Nothing answers: the computer's own connection is down.</summary>
+    Offline
 }
 
 public enum ColituVpnStatus

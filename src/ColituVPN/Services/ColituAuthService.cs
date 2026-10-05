@@ -561,7 +561,9 @@ public sealed class ColituAuthService
         // parallel requests do not all hit 401 and race each other to refresh.
         if (allowRefresh && IsAccessTokenExpiring() && !string.IsNullOrWhiteSpace(_refreshToken))
         {
-            await RefreshSingleFlightAsync(_accessToken);
+            // The caller's deadline covers the refresh too (an automatic reconnect waits at most
+            // 3 s for the panel); the shared refresh itself keeps running for the other callers.
+            await RefreshSingleFlightAsync(_accessToken).WaitAsync(token);
         }
 
         var generation = Interlocked.Read(ref _sessionGeneration);
@@ -581,7 +583,7 @@ public sealed class ColituAuthService
         }
 
         response.Dispose();
-        var outcome = await RefreshSingleFlightAsync(tokenUsed);
+        var outcome = await RefreshSingleFlightAsync(tokenUsed).WaitAsync(token);
         if (generation != Interlocked.Read(ref _sessionGeneration))
         {
             throw new ColituApiException(HttpStatusCode.Unauthorized, Loc.I["auth.expired"], "SIGNED_OUT");
@@ -1121,8 +1123,14 @@ public sealed class ColituAuthService
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
             .FirstOrDefault()?.InformationalVersion;
-        var version = (informational ?? assembly.GetName().Version?.ToString(3) ?? "").Split('+')[0].Trim();
-        return System.Version.TryParse(version, out var parsed) ? parsed.ToString(3) : "2.1.0";
+        // "2.5.5+commit" or "2.5.5-beta": a suffix used to fail the parse and report 2.1.0, which
+        // the updater then took for a very old version.
+        var version = (informational ?? "").Split('+', '-')[0].Trim();
+        if (System.Version.TryParse(version, out var parsed))
+        {
+            return parsed.ToString(3);
+        }
+        return assembly.GetName().Version is { } assemblyVersion ? assemblyVersion.ToString(3) : "2.1.0";
     }
 
     /// <summary>major*100 + minor*10 + patch, the scheme of latest.json's latestVersionCode.</summary>

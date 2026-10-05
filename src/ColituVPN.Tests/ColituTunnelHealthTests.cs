@@ -38,6 +38,29 @@ public class ColituTunnelHealthTests
         unreachableTrojan.Should().BeLessThan(stalledReality);
     }
 
+    [Fact]
+    public void PathCheck_NothingAnswers_IsOffline()
+    {
+        ColituVpnService.ClassifyPath(true, null, [null, null]).Should().Be(ColituPathState.Offline);
+        ColituVpnService.ClassifyPath(false, null, [null, null]).Should().Be(ColituPathState.Offline);
+    }
+
+    [Fact]
+    public void PathCheck_InternetWorksButNotTheServer_IsServerUnreachable()
+    {
+        ColituVpnService.ClassifyPath(true, null, [12, null]).Should().Be(ColituPathState.ServerUnreachable);
+    }
+
+    [Fact]
+    public void PathCheck_ServerAnswers_IsReachable()
+    {
+        // Russian ISPs can block foreign references; the server answering is enough.
+        ColituVpnService.ClassifyPath(true, 40, [null, null]).Should().Be(ColituPathState.Reachable);
+        ColituVpnService.ClassifyPath(true, 40, [12, 30]).Should().Be(ColituPathState.Reachable);
+        // Server address unknown: the references decide.
+        ColituVpnService.ClassifyPath(false, null, [12, null]).Should().Be(ColituPathState.Reachable);
+    }
+
     [Theory]
     [InlineData("172.18.0.1", 30, "172.18.0.2")]
     [InlineData("172.18.0.2", 30, "172.18.0.1")]
