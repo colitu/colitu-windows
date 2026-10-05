@@ -13,18 +13,24 @@ public partial class CoreConfigV2rayService
                 {
                     _coreConfig.routing.rules.AddRange(tunRules);
                 }
-                var (lstDnsExe, lstDirectExe) = BuildRoutingDirectExe();
-                _coreConfig.routing.rules.Add(new()
+                // Bound to the physical adapter (autoOutboundsInterface), the cores' own traffic never
+                // enters the TUN. Xray on Windows cannot name the process behind a TUN connection
+                // either, so these rules only cost a failed process lookup on every connection.
+                if (_config.CoreBasicItem.BindInterface.IsNullOrEmpty())
                 {
-                    port = "53",
-                    process = lstDnsExe,
-                    outboundTag = Global.DnsOutboundTag,
-                });
-                _coreConfig.routing.rules.Add(new()
-                {
-                    process = lstDirectExe,
-                    outboundTag = Global.DirectTag,
-                });
+                    var (lstDnsExe, lstDirectExe) = BuildRoutingDirectExe();
+                    _coreConfig.routing.rules.Add(new()
+                    {
+                        port = "53",
+                        process = lstDnsExe,
+                        outboundTag = Global.DnsOutboundTag,
+                    });
+                    _coreConfig.routing.rules.Add(new()
+                    {
+                        process = lstDirectExe,
+                        outboundTag = Global.DirectTag,
+                    });
+                }
                 _coreConfig.routing.rules.Add(new()
                 {
                     port = "53",

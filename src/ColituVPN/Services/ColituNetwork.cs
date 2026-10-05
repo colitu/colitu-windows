@@ -210,6 +210,129 @@ public static class ColituNetwork
         }
     }
 
+    /// <summary>
+    /// Whether any adapter other than Colitu's own TUN is connected with an IPv4 gateway. Broader
+    /// than <see cref="PhysicalInterfaceName"/> on purpose: PPPoE and mobile broadband count too.
+    /// False means the computer is offline and no reconnect can help.
+    /// </summary>
+    public static bool HasPhysicalNetwork()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces()
+                .Where(adapter => adapter.OperationalStatus == OperationalStatus.Up)
+                .Where(adapter => adapter.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel))
+                .Where(adapter => !IsColituTun(adapter))
+                .Any(adapter => adapter.GetIPProperties().GatewayAddresses
+                    .Any(gateway => gateway.Address.AddressFamily == AddressFamily.InterNetwork && !gateway.Address.Equals(IPAddress.Any)));
+        }
+        catch
+        {
+            // Unknown: let the recovery go ahead rather than wait for ever.
+            return true;
+        }
+    }
+
+    private static bool IsColituTun(NetworkInterface adapter) =>
+        adapter.Name.Equals("xray_tun", StringComparison.OrdinalIgnoreCase)
+        || adapter.Name.Equals("singbox_tun", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Sends one DNS query into Colitu's TUN adapter, where the core answers every DNS query, for
+    /// a random name no cache can hold. True when an answer comes back (a name error counts: the
+    /// resolver works), false when it stays silent or fails, null when there is no TUN adapter.
+    /// </summary>
+    public static async Task<bool?> TunnelDnsAnswersAsync(TimeSpan timeout)
+    {
+        if (TunAddresses() is not { } tun)
+        {
+            return null;
+        }
+        try
+        {
+            using var udp = new UdpClient(new IPEndPoint(tun.Local, 0));
+            var id = (ushort)Random.Shared.Next(1, ushort.MaxValue);
+            var query = BuildDnsQuery(id, $"c{Random.Shared.Next():x8}.colitu.com");
+            await udp.SendAsync(query, new IPEndPoint(tun.Peer, 53));
+            using var cts = new CancellationTokenSource(timeout);
+            while (true)
+            {
+                var reply = await udp.ReceiveAsync(cts.Token);
+                if (DnsAnswerState(reply.Buffer, id) is { } answered)
+                {
+                    return answered;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The TUN adapter's own address and the other host of its /30 (where the core listens).</summary>
+    private static (IPAddress Local, IPAddress Peer)? TunAddresses()
+    {
+        try
+        {
+            var unicast = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(adapter => adapter.OperationalStatus == OperationalStatus.Up && IsColituTun(adapter))
+                .SelectMany(adapter => adapter.GetIPProperties().UnicastAddresses)
+                .FirstOrDefault(address => address.Address.AddressFamily == AddressFamily.InterNetwork);
+            return unicast == null ? null : TunPeer(unicast.Address, unicast.PrefixLength);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static (IPAddress Local, IPAddress Peer)? TunPeer(IPAddress local, int prefixLength)
+    {
+        if (local.AddressFamily != AddressFamily.InterNetwork || prefixLength is < 8 or > 30)
+        {
+            return null;
+        }
+        var bytes = local.GetAddressBytes();
+        var value = (uint)bytes[0] << 24 | (uint)bytes[1] << 16 | (uint)bytes[2] << 8 | bytes[3];
+        var mask = uint.MaxValue << (32 - prefixLength);
+        var network = value & mask;
+        var peer = value == network + 1 ? network + 2 : network + 1;
+        return (local, new IPAddress(new[] { (byte)(peer >> 24), (byte)((peer >> 16) & 0xFF), (byte)((peer >> 8) & 0xFF), (byte)(peer & 0xFF) }));
+    }
+
+    /// <summary>A recursive A query for <paramref name="name"/>.</summary>
+    internal static byte[] BuildDnsQuery(ushort id, string name)
+    {
+        var packet = new List<byte> { (byte)(id >> 8), (byte)(id & 0xFF), 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        foreach (var label in name.TrimEnd('.').Split('.'))
+        {
+            var bytes = System.Text.Encoding.ASCII.GetBytes(label);
+            packet.Add((byte)bytes.Length);
+            packet.AddRange(bytes);
+        }
+        packet.AddRange(new byte[] { 0x00, 0x00, 0x01, 0x00, 0x01 });
+        return packet.ToArray();
+    }
+
+    /// <summary>
+    /// For a reply to query <paramref name="id"/>: true when the resolver answered (no error or
+    /// "no such name"), false when it reported a failure (SERVFAIL, refused). Null for anything else.
+    /// </summary>
+    internal static bool? DnsAnswerState(byte[] reply, ushort id)
+    {
+        if (reply.Length < 12 || reply[0] != (byte)(id >> 8) || reply[1] != (byte)(id & 0xFF) || (reply[2] & 0x80) == 0)
+        {
+            return null;
+        }
+        var rcode = reply[3] & 0x0F;
+        return rcode is 0 or 3;
+    }
+
     /// <summary>Name of another VPN client's adapter that currently owns a default route, if any.</summary>
     public static string? CompetingVpnAdapter()
     {
