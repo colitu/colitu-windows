@@ -15,7 +15,7 @@ namespace ServiceLib.Tests.CoreConfig;
 /// </summary>
 public class ColituRuDirectConfigTests
 {
-    private static CoreConfigContext RuDirectContext(ECoreType core)
+    private static CoreConfigContext RuDirectContext(ECoreType core, bool ruDirect = true)
     {
         var config = CoreConfigTestFactory.CreateConfig(core);
         config.RoutingBasicItem.DomainStrategy = Global.IPIfNonMatch;
@@ -41,14 +41,14 @@ public class ColituRuDirectConfigTests
                     },
                     new()
                     {
-                        Enabled = true,
+                        Enabled = ruDirect,
                         RuleType = ERuleType.Routing,
                         OutboundTag = Global.DirectTag,
                         Domain = ["geosite:category-ru"],
                     },
                     new()
                     {
-                        Enabled = true,
+                        Enabled = ruDirect,
                         RuleType = ERuleType.Routing,
                         OutboundTag = Global.DirectTag,
                         Ip = ["geoip:ru"],
@@ -72,6 +72,36 @@ public class ColituRuDirectConfigTests
         cfg.routing.rules.Should().Contain(r => r.domain != null && r.domain.Contains("geosite:category-ru") && r.outboundTag == Global.DirectTag);
         cfg.routing.rules.Should().Contain(r => r.ip != null && r.ip.Contains("geoip:ru") && r.outboundTag == Global.DirectTag);
         cfg.outbounds.Should().Contain(o => o.tag == Global.DirectTag);
+    }
+
+    /// <summary>
+    /// Privacy mode (or a server in Russia) leaves the Russian rules in the profile but disabled:
+    /// neither core may route anything Russian directly then.
+    /// </summary>
+    [Fact]
+    public void Xray_DisabledRussianRules_SendNothingDirect()
+    {
+        var result = new CoreConfigV2rayService(RuDirectContext(ECoreType.Xray, ruDirect: false)).GenerateClientConfigContent();
+
+        result.Success.Should().BeTrue($"ret msg: {result.Msg}");
+        var cfg = JsonUtils.Deserialize<V2rayConfig>(result.Data!.ToString()!)!;
+
+        cfg.routing.rules.Should().NotContain(r => r.domain != null && r.domain.Contains("geosite:category-ru"));
+        cfg.routing.rules.Should().NotContain(r => r.ip != null && r.ip.Contains("geoip:ru"));
+        result.Data!.ToString()!.Should().NotContain("category-ru");
+    }
+
+    [Fact]
+    public void SingBox_DisabledRussianRules_SendNothingDirect()
+    {
+        var result = new CoreConfigSingboxService(RuDirectContext(ECoreType.sing_box, ruDirect: false)).GenerateClientConfigContent();
+
+        result.Success.Should().BeTrue($"ret msg: {result.Msg}");
+        var cfg = JsonUtils.Deserialize<SingboxConfig>(result.Data!.ToString()!)!;
+
+        (cfg.route.rule_set ?? []).Should().NotContain(r => r.tag == "geosite-category-ru" || r.tag == "geoip-ru");
+        cfg.route.rules.Should().NotContain(r => r.rule_set != null && (r.rule_set.Contains("geosite-category-ru") || r.rule_set.Contains("geoip-ru")));
+        result.Data!.ToString()!.Should().NotContain("category-ru");
     }
 
     [Fact]

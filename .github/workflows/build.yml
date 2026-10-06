@@ -26,11 +26,11 @@ jobs:
 
       - name: Restore
         working-directory: ./src
-        run: dotnet restore ./ColituVPN/ColituVPN.csproj && dotnet restore ./ServiceLib.Tests/ServiceLib.Tests.csproj && dotnet restore ./ColituVPN.Tests/ColituVPN.Tests.csproj
+        run: dotnet restore ./ColituVPN/ColituVPN.csproj && dotnet restore ./ColituKillSwitchService/ColituKillSwitchService.csproj && dotnet restore ./ServiceLib.Tests/ServiceLib.Tests.csproj && dotnet restore ./ColituVPN.Tests/ColituVPN.Tests.csproj
 
       - name: Build Colitu VPN
         working-directory: ./src
-        run: dotnet build ./ColituVPN/ColituVPN.csproj -c Release --no-restore
+        run: dotnet build ./ColituVPN/ColituVPN.csproj -c Release --no-restore && dotnet build ./ColituKillSwitchService/ColituKillSwitchService.csproj -c Release --no-restore
 
       - name: Test
         working-directory: ./src
@@ -40,7 +40,9 @@ jobs:
 
       - name: Publish
         working-directory: ./src
-        run: dotnet publish ./ColituVPN/ColituVPN.csproj -c Release -r win-x64 -p:SelfContained=true -o ${{ github.workspace }}/publish
+        run: |
+          dotnet publish ./ColituVPN/ColituVPN.csproj -c Release -r win-x64 -p:SelfContained=true -o ${{ github.workspace }}/publish
+          dotnet publish ./ColituKillSwitchService/ColituKillSwitchService.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=true -o ${{ github.workspace }}/publish
 
       - name: Upload build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

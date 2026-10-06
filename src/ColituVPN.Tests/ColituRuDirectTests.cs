@@ -57,6 +57,48 @@ public class ColituRuDirectTests
         rules.Single(r => r.Id == "colitu-ru-direct-ip").Enabled.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("DE")]
+    [InlineData("RU")]
+    [InlineData(null)]
+    public void PrivacyMode_SendsEverythingThroughTheTunnel(string? country)
+    {
+        var rules = ColituVpnService.BuildColituRoutingRules(new ColituVpnPreferences(PrivacyModeEnabled: true), country);
+
+        rules.Single(r => r.Id == "colitu-ru-direct-domain").Enabled.Should().BeFalse();
+        rules.Single(r => r.Id == "colitu-ru-direct-ip").Enabled.Should().BeFalse();
+        // Nothing else may leave outside the tunnel either.
+        rules.Where(r => r.Enabled && r.OutboundTag == Global.DirectTag).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("DE", false, true)]
+    [InlineData(null, false, true)]
+    [InlineData(" ru ", false, false)]
+    [InlineData("DE", true, false)]
+    [InlineData("RU", true, false)]
+    public void RussianSitesDirect_OnlyWithoutPrivacyModeAndOutsideRussia(string? country, bool privacyMode, bool expected)
+    {
+        ColituVpnService.RussianSitesDirect(country, privacyMode).Should().Be(expected);
+    }
+
+    [Fact]
+    public void PrivacyMode_IsOffByDefault_AlsoForStatesSavedByOlderBuilds()
+    {
+        new ColituVpnPreferences().PrivacyModeEnabled.Should().BeFalse();
+        new ColituVpnPreferences().RuDirectNoticeShown.Should().BeFalse();
+
+        var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        var old = System.Text.Json.JsonSerializer.Deserialize<ColituVpnPreferences>("{\"KillSwitchEnabled\":true,\"AdBlockEnabled\":true}", options)!;
+        old.PrivacyModeEnabled.Should().BeFalse();
+        old.RuDirectNoticeShown.Should().BeFalse();
+
+        var saved = System.Text.Json.JsonSerializer.Serialize(new ColituVpnPreferences(PrivacyModeEnabled: true, RuDirectNoticeShown: true), options);
+        var loaded = System.Text.Json.JsonSerializer.Deserialize<ColituVpnPreferences>(saved, options)!;
+        loaded.PrivacyModeEnabled.Should().BeTrue();
+        loaded.RuDirectNoticeShown.Should().BeTrue();
+    }
+
     [Fact]
     public void RuleSetFilesShipWithTheApp()
     {

@@ -14,6 +14,9 @@ public partial class ColituMainWindow
     private void ShowAuth()
     {
         _refresh.Stop();
+        HidePaused();
+        // Signed out: an auto-connect the kill switch was holding the internet for won't come.
+        _ = _vpn.ReleaseHeldKillSwitchAsync("signed out");
         ShowView(AuthView);
         PasswordBox.Clear();
         PasswordPlainBox.Clear();
@@ -110,6 +113,13 @@ public partial class ColituMainWindow
             var result = _registerMode
                 ? await _auth.RegisterAsync("", email, password)
                 : await _auth.LoginAsync(email, password);
+            if (result.RequiresMfa)
+            {
+                PasswordBox.Clear();
+                PasswordPlainBox.Clear();
+                ShowMfa(result);
+                return;
+            }
             if (!result.Success)
             {
                 ShowAuthError(result.Error ?? Loc.I["err.generic"]);
@@ -125,6 +135,11 @@ public partial class ColituMainWindow
                 return;
             }
             await EnterAppAsync(offline: false);
+            if (result.DevicePaused != null)
+            {
+                await ShowPausedAsync(result.DevicePaused);
+                return;
+            }
             if (_registerMode && _auth.CurrentSubscription?.Active == true)
             {
                 ShowToast(PlanTitle(_auth.CurrentSubscription) + " · " + PlanDetailText(_auth.CurrentSubscription));

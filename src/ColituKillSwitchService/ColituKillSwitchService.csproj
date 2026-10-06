@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+		Colitu VPN kill-switch service: owns the persistent WFP filters so a crash of the app or
+		the VPN core fails closed. Published by scripts/build-installer.ps1 as a trimmed,
+		self-contained single file next to ColituVPN.exe and installed as a LocalSystem service.
+	-->
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<AssemblyName>ColituKillSwitchService</AssemblyName>
+		<RootNamespace>Colitu.KillSwitch</RootNamespace>
+		<Nullable>enable</Nullable>
+		<InvariantGlobalization>true</InvariantGlobalization>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+		<UseSystemResourceKeys>true</UseSystemResourceKeys>
+		<Description>Colitu VPN kill-switch service</Description>
+		<AssemblyTitle>Colitu VPN kill-switch service</AssemblyTitle>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="System.ServiceProcess.ServiceController" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\ColituKillSwitch.Core\ColituKillSwitch.Core.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="ColituVPN.Tests" />
+	</ItemGroup>
+
+</Project>

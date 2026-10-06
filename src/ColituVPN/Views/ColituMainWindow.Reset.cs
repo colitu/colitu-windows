@@ -134,6 +134,17 @@ public partial class ColituMainWindow
         try
         {
             var result = await _auth.ResetPasswordAsync(ResetEmailBox.Text.Trim(), code, password);
+            if (result.RequiresMfa)
+            {
+                // New password set; the account still wants its second factor before signing in.
+                ResetPasswordBox.Clear();
+                ResetRepeatBox.Clear();
+                ResetCodeBox.Clear();
+                _resetTimer?.Stop();
+                EmailBox.Text = ResetEmailBox.Text.Trim();
+                ShowMfa(result);
+                return;
+            }
             if (!result.Success)
             {
                 ShowResetError(result.Error ?? Loc.I["err.generic"]);
@@ -151,6 +162,10 @@ public partial class ColituMainWindow
             }
             await EnterAppAsync(offline: false);
             ShowToast(Loc.I["reset.done"]);
+            if (result.DevicePaused != null)
+            {
+                await ShowPausedAsync(result.DevicePaused);
+            }
         }
         catch (Exception ex)
         {

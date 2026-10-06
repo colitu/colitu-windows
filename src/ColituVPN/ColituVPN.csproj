@@ -51,6 +51,7 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\ServiceLib\ServiceLib.csproj" />
+		<ProjectReference Include="..\ColituKillSwitch.Core\ColituKillSwitch.Core.csproj" />
 	</ItemGroup>
 
 	<!-- Build çıktısına doğrudan bin\xray\ olarak kopyala -->

@@ -32,8 +32,24 @@ public sealed class ColituApiClient
             PremiumAllowed = true,
             Unlimited = subscription?.Unlimited ?? false,
             Tier = subscription?.Tier ?? "premium",
-            Servers = servers
+            Servers = servers,
+            Multihop = MapMultihop(response.Multihop)
         };
+    }
+
+    /// <summary>The multihop (double VPN) routes only: <c>GET /multihop/servers</c>.</summary>
+    public async Task<List<ColituVpnServer>> GetMultihopServersAsync()
+    {
+        var response = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituServerListDto>("/multihop/servers") ?? new();
+        return MapMultihop(response.Servers);
+    }
+
+    internal static List<ColituVpnServer> MapMultihop(IEnumerable<ColituServerDto>? routes)
+    {
+        return (routes ?? [])
+            .Where(route => !string.IsNullOrWhiteSpace(route.Id) && route.Multihop != false && route.Entry != null && route.Exit != null)
+            .Select(MapRoute)
+            .ToList();
     }
 
     public async Task<ColituStatsResponse> GetStatsAsync()
@@ -88,7 +104,10 @@ public sealed class ColituApiClient
     /// </summary>
     public async Task<ColituVpnConfigResponse?> GetConfigAsync(ColituVpnServer? server, CancellationToken token = default)
     {
-        var envelope = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituConfigEnvelopeDto>("/config?protocol=auto", token);
+        // A multihop route has its own config endpoint; the envelope is the same as a node's.
+        var multihop = server is { IsMultihop: true, Id.Length: > 0 };
+        var path = multihop ? ConfigPathForRoute(server!.Id!) : "/config?protocol=auto";
+        var envelope = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituConfigEnvelopeDto>(path, token);
         if (envelope?.Profile == null)
         {
             return null;
@@ -100,7 +119,8 @@ public sealed class ColituApiClient
             throw new InvalidOperationException("Connection settings have expired. Please try again.");
         }
 
-        var nodeId = envelope.Server?.Id ?? server?.Id;
+        // The route id stays the identity of a multihop choice (list marker, config cache).
+        var nodeId = multihop ? server!.Id : envelope.Server?.Id ?? server?.Id;
         var candidates = new List<ColituConfigCandidate>();
         var pinned = await PinServerAddressesAsync(new[] { envelope.Profile }.Concat((envelope.Candidates ?? []).Select(item => item.Profile)), token);
         void Add(string? protocol, ColituConfigProfileDto? profile)
@@ -135,13 +155,17 @@ public sealed class ColituApiClient
 
         var selected = envelope.Server == null ? server : new ColituVpnServer
         {
-            Id = envelope.Server.Id,
-            LocationId = envelope.Server.Id,
+            Id = nodeId,
+            LocationId = nodeId,
             Name = envelope.Server.Name,
             DisplayName = envelope.Server.Name,
             CountryCode = envelope.Server.Country,
             Country = CountryName(envelope.Server.Country)
         };
+        if (selected != null && envelope.Server is { Multihop: true } route)
+        {
+            ApplyRoute(selected, route.RouteSlug, route.Entry, route.Exit);
+        }
 
         return new ColituVpnConfigResponse
         {
@@ -226,6 +250,95 @@ public sealed class ColituApiClient
 
     public Task SendStabilityLogAsync(string eventName, string state, ColituVpnServer? server, string? reason, string? error) => Task.CompletedTask;
 
+    internal static string ConfigPathForRoute(string routeId) => $"/multihop/routes/{Uri.EscapeDataString(routeId)}/config";
+
+    /// <summary>
+    /// A rotation or multihop connection runs on VLESS only: the other transports cannot be carried
+    /// through the mesh. Returns the configuration with just the VLESS candidates, or null when none is left.
+    /// </summary>
+    internal static ColituVpnConfigResponse? RestrictToVless(ColituVpnConfigResponse config)
+    {
+        var vless = config.Candidates.Where(candidate => IsVless(candidate.Protocol)).ToList();
+        if (vless.Count == 0)
+        {
+            return null;
+        }
+        if (vless.Count == config.Candidates.Count)
+        {
+            return config;
+        }
+        return new ColituVpnConfigResponse
+        {
+            ServerId = config.ServerId,
+            Server = config.Server,
+            ConfigType = config.ConfigType,
+            ProtocolType = vless[0].Protocol,
+            RawConfig = string.Join(Environment.NewLine, vless.Select(item => item.ShareLink)),
+            Candidates = vless,
+            Revision = config.Revision,
+            ExpiresAt = config.ExpiresAt,
+            OfflineGraceUntil = config.OfflineGraceUntil,
+            Unlimited = config.Unlimited
+        };
+    }
+
+    internal static bool IsVless(string? protocol) =>
+        string.Equals(protocol, "vless-reality", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(protocol, "vless-xhttp", StringComparison.OrdinalIgnoreCase);
+
+    // ── Rotating exit IP ────────────────────────────────────────────────────
+
+    public async Task<ColituRotationPreference> GetRotationAsync(CancellationToken token = default)
+    {
+        var response = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituRotationEnvelopeDto>("/me/rotation", token);
+        return ColituRotation.Map(response?.Rotation);
+    }
+
+    /// <summary>Saves the preference; the panel answers 400 INVALID_PREFERENCE for a country set it cannot serve.</summary>
+    public async Task<ColituRotationPreference> SetRotationAsync(int intervalSeconds, IEnumerable<string> countries, CancellationToken token = default)
+    {
+        var response = await ColituAuthService.Instance.PutAuthorizedJsonAsync<ColituRotationEnvelopeDto>("/me/rotation", new
+        {
+            interval_seconds = intervalSeconds,
+            countries = ColituRotation.NormalizeCountries(countries)
+        }, token);
+        return ColituRotation.Map(response?.Rotation);
+    }
+
+    /// <summary>Where the rotation is for the node this device is connected to.</summary>
+    public async Task<ColituRotationStatus?> GetRotationStatusAsync(string nodeId, CancellationToken token = default)
+    {
+        var response = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituRotationStatusEnvelopeDto>(
+            $"/me/rotation/status?node_id={Uri.EscapeDataString(nodeId)}", token);
+        return ColituRotation.MapStatus(response?.Status);
+    }
+
+    private static ColituVpnServer MapRoute(ColituServerDto dto)
+    {
+        var server = MapServer(dto);
+        // The route's own country/city describe the exit; its latency host is the entry node.
+        ApplyRoute(server, dto.RouteSlug, dto.Entry, dto.Exit);
+        server.Categories = [];
+        return server;
+    }
+
+    private static void ApplyRoute(ColituVpnServer server, string? slug, ColituRouteEndpointDto? entry, ColituRouteEndpointDto? exit)
+    {
+        server.IsMultihop = true;
+        server.RouteSlug = slug;
+        server.Entry = ColituRotation.MapEndpoint(entry);
+        server.Exit = ColituRotation.MapEndpoint(exit);
+        if (server.Exit?.Country is { Length: 2 } exitCountry)
+        {
+            server.CountryCode = exitCountry;
+            server.Country = CountryName(exitCountry);
+        }
+        if (server.Exit?.City is { Length: > 0 } exitCity)
+        {
+            server.City = exitCity;
+        }
+    }
+
     private static ColituVpnServer MapServer(ColituServerDto dto)
     {
         var code = (dto.Country ?? "").Trim().ToUpperInvariant();
@@ -295,6 +408,220 @@ public sealed class ColituProtocolObservation
     public string Protocol { get; set; } = "";
     public bool Reachable { get; set; }
     public int? LatencyMs { get; set; }
+}
+
+/// <summary>One end of a multihop route, or the exit a rotation currently uses.</summary>
+public sealed class ColituRouteEndpoint
+{
+    public string? NodeId { get; set; }
+    public string? Name { get; set; }
+    /// <summary>Upper-case ISO country code; null when the panel sent none.</summary>
+    public string? Country { get; set; }
+    public string? City { get; set; }
+
+    /// <summary>City, else node name, else country code: how the end is named in the UI.</summary>
+    public string Label => !string.IsNullOrWhiteSpace(City) ? City! : !string.IsNullOrWhiteSpace(Name) ? Name! : Country ?? "";
+}
+
+public sealed class ColituRotationCountry
+{
+    public string Country { get; set; } = "";
+    /// <summary>Part of the set used when the user picks no countries (Russia is not).</summary>
+    public bool InDefault { get; set; }
+    /// <summary>Exit nodes the panel has in this country.</summary>
+    public int Exits { get; set; }
+}
+
+/// <summary>The account's rotating-exit-IP preference (<c>/me/rotation</c>).</summary>
+public sealed class ColituRotationPreference
+{
+    /// <summary>0 = off.</summary>
+    public int IntervalSeconds { get; set; }
+    /// <summary>Chosen countries; empty = the default set.</summary>
+    public List<string> Countries { get; set; } = [];
+    public List<int> Intervals { get; set; } = [];
+    public List<ColituRotationCountry> AvailableCountries { get; set; } = [];
+    public List<string> Protocols { get; set; } = [];
+    public bool ChangesExitCountry { get; set; }
+    public bool Active => IntervalSeconds > 0;
+}
+
+/// <summary>Where the rotation of the connected node is (<c>/me/rotation/status</c>).</summary>
+public sealed class ColituRotationStatus
+{
+    public bool Active { get; set; }
+    /// <summary>off, not_in_mesh or not_enough_exits while inactive.</summary>
+    public string? Reason { get; set; }
+    public int IntervalSeconds { get; set; }
+    public ColituRouteEndpoint? Entry { get; set; }
+    public ColituRouteEndpoint? CurrentExit { get; set; }
+    public ColituRouteEndpoint? NextExit { get; set; }
+    public DateTimeOffset? WindowStartedAt { get; set; }
+    public DateTimeOffset? NextChangeAt { get; set; }
+    public List<string> Protocols { get; set; } = [];
+}
+
+/// <summary>Validation and timing rules of the rotating exit IP.</summary>
+public static class ColituRotation
+{
+    /// <summary>Off, 5, 10 and 30 minutes.</summary>
+    public static readonly int[] IntervalChoices = [0, 300, 600, 1800];
+
+    /// <summary>The status is never asked for more often than this.</summary>
+    public const int MinStatusPollSeconds = 60;
+
+    private const int MaxStatusPollSeconds = 35 * 60;
+
+    public static bool IsValidInterval(int seconds) => Array.IndexOf(IntervalChoices, seconds) >= 0;
+
+    /// <summary>Upper-case two-letter codes, no duplicates, sorted; anything else is dropped.</summary>
+    public static List<string> NormalizeCountries(IEnumerable<string>? countries)
+    {
+        return (countries ?? [])
+            .Select(code => (code ?? "").Trim().ToUpperInvariant())
+            .Select(code => code == "UK" ? "GB" : code)
+            .Where(code => code.Length == 2 && code.All(ch => ch is >= 'A' and <= 'Z'))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(code => code, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>Countries with exits that the panel includes when the user picks none.</summary>
+    public static List<string> DefaultCountries(IEnumerable<ColituRotationCountry>? available)
+    {
+        return NormalizeCountries((available ?? []).Where(item => item.InDefault && item.Exits > 0).Select(item => item.Country));
+    }
+
+    /// <summary>What the checklist shows: the chosen countries, or the default set when none were chosen.</summary>
+    public static List<string> SelectedCountries(ColituRotationPreference preference)
+    {
+        var chosen = NormalizeCountries(preference.Countries);
+        return chosen.Count > 0 ? chosen : DefaultCountries(preference.AvailableCountries);
+    }
+
+    public enum Validation
+    {
+        Ok,
+        InvalidInterval,
+        /// <summary>Fewer than two of the chosen countries have exits.</summary>
+        TooFewCountries
+    }
+
+    /// <summary>
+    /// The panel's rule: an interval of 0/5/10/30 minutes, and either no countries (the default set,
+    /// without Russia) or at least two countries that have exits.
+    /// </summary>
+    public static Validation Validate(int intervalSeconds, IEnumerable<string>? countries, IEnumerable<ColituRotationCountry>? available)
+    {
+        if (!IsValidInterval(intervalSeconds))
+        {
+            return Validation.InvalidInterval;
+        }
+        var chosen = NormalizeCountries(countries);
+        if (intervalSeconds == 0 || chosen.Count == 0)
+        {
+            return Validation.Ok;
+        }
+        var withExits = (available ?? []).Where(item => item.Exits > 0).Select(item => item.Country.ToUpperInvariant()).ToHashSet();
+        return chosen.Count(code => withExits.Contains(code)) >= 2 ? Validation.Ok : Validation.TooFewCountries;
+    }
+
+    /// <summary>The list to send: empty (= default set) when the checklist still equals the default set.</summary>
+    public static List<string> PayloadCountries(IEnumerable<string>? selected, IEnumerable<ColituRotationCountry>? available)
+    {
+        var chosen = NormalizeCountries(selected);
+        return chosen.SequenceEqual(DefaultCountries(available), StringComparer.Ordinal) ? [] : chosen;
+    }
+
+    /// <summary>
+    /// When to ask the panel for the status again: at <paramref name="nextChangeAt"/>, but never sooner
+    /// than <see cref="MinStatusPollSeconds"/> from now (and not later than the longest interval).
+    /// </summary>
+    public static TimeSpan NextPollDelay(DateTimeOffset? nextChangeAt, DateTimeOffset now)
+    {
+        var seconds = nextChangeAt is { } at ? (at - now).TotalSeconds + 1 : MinStatusPollSeconds;
+        return TimeSpan.FromSeconds(Math.Clamp(seconds, MinStatusPollSeconds, MaxStatusPollSeconds));
+    }
+
+    /// <summary>"4:07" until the next change; "0:00" once it is due.</summary>
+    public static string FormatCountdown(TimeSpan remaining)
+    {
+        if (remaining < TimeSpan.Zero)
+        {
+            remaining = TimeSpan.Zero;
+        }
+        return $"{(int)remaining.TotalMinutes}:{remaining.Seconds:00}";
+    }
+
+    internal static ColituRouteEndpoint? MapEndpoint(ColituRouteEndpointDto? dto)
+    {
+        if (dto == null)
+        {
+            return null;
+        }
+        var country = (dto.Country ?? "").Trim().ToUpperInvariant();
+        return new ColituRouteEndpoint
+        {
+            NodeId = dto.NodeId,
+            Name = dto.Name,
+            Country = country.Length == 2 ? country : null,
+            City = dto.City
+        };
+    }
+
+    /// <summary>An endpoint object from the status; anything else (null, a bare string) is read as far as it goes.</summary>
+    private static ColituRouteEndpoint? MapEndpoint(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                return MapEndpoint(element.Deserialize<ColituRouteEndpointDto>());
+            case JsonValueKind.String:
+                return new ColituRouteEndpoint { Name = element.GetString() };
+            default:
+                return null;
+        }
+    }
+
+    internal static ColituRotationPreference Map(ColituRotationDto? dto)
+    {
+        if (dto == null)
+        {
+            return new ColituRotationPreference();
+        }
+        return new ColituRotationPreference
+        {
+            IntervalSeconds = IsValidInterval(dto.IntervalSeconds) ? dto.IntervalSeconds : 0,
+            Countries = NormalizeCountries(dto.Countries),
+            Intervals = (dto.Intervals ?? []).Where(value => value > 0).Distinct().OrderBy(value => value).ToList(),
+            AvailableCountries = (dto.AvailableCountries ?? [])
+                .Where(item => !string.IsNullOrWhiteSpace(item.Country))
+                .Select(item => new ColituRotationCountry { Country = item.Country!.Trim().ToUpperInvariant(), InDefault = item.InDefault, Exits = item.Exits })
+                .ToList(),
+            Protocols = dto.Protocols ?? [],
+            ChangesExitCountry = dto.ChangesExitCountry
+        };
+    }
+
+    internal static ColituRotationStatus? MapStatus(ColituRotationStatusDto? dto)
+    {
+        if (dto == null)
+        {
+            return null;
+        }
+        return new ColituRotationStatus
+        {
+            Active = dto.Active,
+            Reason = dto.Reason,
+            IntervalSeconds = dto.IntervalSeconds,
+            Entry = MapEndpoint(dto.Entry),
+            CurrentExit = MapEndpoint(dto.CurrentExit),
+            NextExit = MapEndpoint(dto.NextExit),
+            WindowStartedAt = dto.WindowStartedAt,
+            NextChangeAt = dto.NextChangeAt,
+            Protocols = dto.Protocols ?? []
+        };
+    }
 }
 
 /// <summary>
@@ -485,6 +812,17 @@ public static class ColituShareLinkBuilder
 internal sealed class ColituServerListDto
 {
     [JsonPropertyName("servers")] public List<ColituServerDto>? Servers { get; set; }
+    /// <summary>Multihop routes; absent from an older panel.</summary>
+    [JsonPropertyName("multihop")] public List<ColituServerDto>? Multihop { get; set; }
+}
+
+/// <summary>One end of a multihop route (or the exit a rotation currently uses).</summary>
+internal sealed class ColituRouteEndpointDto
+{
+    [JsonPropertyName("node_id")] public string? NodeId { get; set; }
+    [JsonPropertyName("name")] public string? Name { get; set; }
+    [JsonPropertyName("country")] public string? Country { get; set; }
+    [JsonPropertyName("city")] public string? City { get; set; }
 }
 
 internal sealed class ColituServerDto
@@ -500,6 +838,12 @@ internal sealed class ColituServerDto
     [JsonPropertyName("categories")] public List<string>? Categories { get; set; }
     [JsonPropertyName("latency_host")] public string? LatencyHost { get; set; }
     [JsonPropertyName("latency_port")] public int? LatencyPort { get; set; }
+    // Multihop routes only.
+    [JsonPropertyName("multihop")] public bool? Multihop { get; set; }
+    [JsonPropertyName("route_slug")] public string? RouteSlug { get; set; }
+    [JsonPropertyName("entry")] public ColituRouteEndpointDto? Entry { get; set; }
+    [JsonPropertyName("exit")] public ColituRouteEndpointDto? Exit { get; set; }
+    [JsonPropertyName("latency_note")] public string? LatencyNote { get; set; }
 }
 
 internal sealed class ColituUsageDto
@@ -529,6 +873,10 @@ internal sealed class ColituConfigServerDto
     [JsonPropertyName("name")] public string? Name { get; set; }
     [JsonPropertyName("country")] public string? Country { get; set; }
     [JsonPropertyName("region")] public string? Region { get; set; }
+    [JsonPropertyName("multihop")] public bool? Multihop { get; set; }
+    [JsonPropertyName("route_slug")] public string? RouteSlug { get; set; }
+    [JsonPropertyName("entry")] public ColituRouteEndpointDto? Entry { get; set; }
+    [JsonPropertyName("exit")] public ColituRouteEndpointDto? Exit { get; set; }
 }
 
 internal sealed class ColituConfigProfileDto
@@ -541,4 +889,45 @@ internal sealed class ColituConfigCandidateDto
 {
     [JsonPropertyName("protocol")] public string? Protocol { get; set; }
     [JsonPropertyName("profile")] public ColituConfigProfileDto? Profile { get; set; }
+}
+
+internal sealed class ColituRotationEnvelopeDto
+{
+    [JsonPropertyName("rotation")] public ColituRotationDto? Rotation { get; set; }
+}
+
+internal sealed class ColituRotationDto
+{
+    [JsonPropertyName("interval_seconds")] public int IntervalSeconds { get; set; }
+    [JsonPropertyName("countries")] public List<string>? Countries { get; set; }
+    [JsonPropertyName("intervals")] public List<int>? Intervals { get; set; }
+    [JsonPropertyName("available_countries")] public List<ColituRotationCountryDto>? AvailableCountries { get; set; }
+    [JsonPropertyName("protocols")] public List<string>? Protocols { get; set; }
+    [JsonPropertyName("changes_exit_country")] public bool ChangesExitCountry { get; set; }
+}
+
+internal sealed class ColituRotationCountryDto
+{
+    [JsonPropertyName("country")] public string? Country { get; set; }
+    [JsonPropertyName("in_default")] public bool InDefault { get; set; }
+    [JsonPropertyName("exits")] public int Exits { get; set; }
+}
+
+internal sealed class ColituRotationStatusEnvelopeDto
+{
+    [JsonPropertyName("status")] public ColituRotationStatusDto? Status { get; set; }
+}
+
+internal sealed class ColituRotationStatusDto
+{
+    [JsonPropertyName("active")] public bool Active { get; set; }
+    [JsonPropertyName("reason")] public string? Reason { get; set; }
+    [JsonPropertyName("interval_seconds")] public int IntervalSeconds { get; set; }
+    // The ends are objects today; JsonElement keeps an unexpected shape from failing the whole status.
+    [JsonPropertyName("entry")] public JsonElement Entry { get; set; }
+    [JsonPropertyName("current_exit")] public JsonElement CurrentExit { get; set; }
+    [JsonPropertyName("next_exit")] public JsonElement NextExit { get; set; }
+    [JsonPropertyName("window_started_at")] public DateTimeOffset? WindowStartedAt { get; set; }
+    [JsonPropertyName("next_change_at")] public DateTimeOffset? NextChangeAt { get; set; }
+    [JsonPropertyName("protocols")] public List<string>? Protocols { get; set; }
 }

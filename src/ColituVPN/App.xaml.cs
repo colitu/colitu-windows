@@ -123,6 +123,9 @@ public partial class App : Application
     /// </summary>
     private static void RunUninstallCleanup()
     {
+        // First, and whatever else fails: the kill switch's persistent firewall filters would keep
+        // this computer offline after Colitu is gone.
+        Services.ColituVpnService.RemoveKillSwitchForUninstall();
         try
         {
             if (!AppManager.Instance.InitApp())

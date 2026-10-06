@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+		Shared by the kill-switch service and the app: the pipe protocol and its validation, the
+		allow-list → WFP filter plan, the arm/disarm state machine and the persistent WFP firewall.
+		No Windows UI, no network access; trimming-safe (System.Text.Json source generation).
+	-->
+	<PropertyGroup>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<AssemblyName>ColituKillSwitch.Core</AssemblyName>
+		<RootNamespace>Colitu.KillSwitch</RootNamespace>
+		<Nullable>enable</Nullable>
+		<IsTrimmable>true</IsTrimmable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="ColituVPN.Tests" />
+		<InternalsVisibleTo Include="ColituKillSwitchService" />
+	</ItemGroup>
+
+</Project>

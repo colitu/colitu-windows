@@ -97,7 +97,7 @@ public partial class ColituMainWindow
             : _planRequired ? loc["home.title.noplan"]
             : loc["home.title.off"];
         HomeSubtitle.Text = on ? loc.Format("home.sub.on", ("server", ServerLabel(_vpn.ConnectedServer) ?? loc["server.auto"]))
-            : blocked ? loc["home.sub.blocked"]
+            : blocked ? loc[_vpn.KillSwitchHeldAfterCrash ? "home.sub.blockedCrash" : "home.sub.blocked"]
             : busy ? loc["home.sub.connecting"]
             : _planRequired ? loc["home.sub.noplan"]
             : status == ColituVpnStatus.Error && _vpn.LastError is { Length: > 0 } error ? error
@@ -119,6 +119,9 @@ public partial class ColituMainWindow
         TrayIcon.ToolTipText = $"Colitu VPN · {StatusChipText.Text}";
         TrayConnectItem.Header = on || busy || blocked ? loc["tray.disconnect"] : loc["tray.connect"];
         UnblockButton.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
+        ApplyRuDirectIndicator();
+        ApplySplitChip();
+        ApplyProxyCoverageChip();
 
         if (_shownStatus != status)
         {
@@ -141,6 +144,129 @@ public partial class ColituMainWindow
         var on = _vpn.Status == ColituVpnStatus.Connected;
         SessionTimer.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         PowerIcon.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
+        // The clock ticks every second: the rotation countdown rides on it.
+        ApplyRouteChip();
+    }
+
+    // ── Multihop route and rotating exit IP ────────────────────────────────
+    private ColituRotationStatus? _rotationStatus;
+    private string? _rotationNode;
+    private DateTimeOffset _rotationPollAt = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastRotationPoll = DateTimeOffset.MinValue;
+    private bool _rotationPolling;
+    private int _rotationEpoch;
+
+    /// <summary>
+    /// A chip under the status: "Entry FI → Exit DE" on a multihop route; with a rotating IP the
+    /// current exit and the time to the next change.
+    /// </summary>
+    private void ApplyRouteChip()
+    {
+        if (RouteChip == null)
+        {
+            return;
+        }
+        string? text = null;
+        var connected = _vpn.Status == ColituVpnStatus.Connected;
+        var server = connected ? _vpn.ConnectedServer : null;
+        if (server is { IsMultihop: true })
+        {
+            ForgetRotationStatus();
+            text = Loc.I.Format("multihop.home", ("entry", RouteEndText(server.Entry)), ("exit", RouteEndText(server.Exit)));
+        }
+        else if (connected && _vpn.RotationActive && server?.Id is { Length: > 0 } nodeId)
+        {
+            if (_rotationNode != nodeId)
+            {
+                // Another node: what the last one reported does not apply.
+                _rotationNode = nodeId;
+                ResetRotationStatus();
+            }
+            text = RotationText();
+            PollRotationIfDue();
+        }
+        else
+        {
+            ForgetRotationStatus();
+        }
+        RouteChip.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+        RouteChipText.Text = text?.ToUpper(Loc.I.Culture) ?? "";
+    }
+
+    private static string RouteEndText(ColituRouteEndpoint? end) => end?.Country ?? end?.Label ?? "?";
+
+    private string? RotationText()
+    {
+        if (_rotationStatus is not { Active: true, CurrentExit: { } exit, NextChangeAt: { } next })
+        {
+            return null;
+        }
+        var label = exit.Country is { Length: 2 } country && !string.Equals(exit.Label, country, StringComparison.OrdinalIgnoreCase)
+            ? $"{exit.Label} ({country})"
+            : exit.Label;
+        var left = next - DateTimeOffset.UtcNow;
+        return left > TimeSpan.Zero
+            ? Loc.I.Format("rotation.home", ("exit", label), ("time", ColituRotation.FormatCountdown(left)))
+            : Loc.I.Format("rotation.homeDue", ("exit", label));
+    }
+
+    /// <summary>Asks for the status at the announced change time, never more often than every 60 s.</summary>
+    private void PollRotationIfDue()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_rotationPolling || now < _rotationPollAt || now - _lastRotationPoll < TimeSpan.FromSeconds(ColituRotation.MinStatusPollSeconds))
+        {
+            return;
+        }
+        _ = PollRotationAsync();
+    }
+
+    private async Task PollRotationAsync()
+    {
+        _rotationPolling = true;
+        _lastRotationPoll = DateTimeOffset.UtcNow;
+        var epoch = _rotationEpoch;
+        try
+        {
+            var status = await _vpn.GetRotationStatusAsync();
+            if (epoch != _rotationEpoch)
+            {
+                return;
+            }
+            _rotationStatus = status;
+            var now = DateTimeOffset.UtcNow;
+            // Inactive (the node is not in the rotation mesh, too few exits): look again later.
+            _rotationPollAt = now + (status is { Active: true } ? ColituRotation.NextPollDelay(status.NextChangeAt, now) : TimeSpan.FromMinutes(5));
+        }
+        catch (Exception ex)
+        {
+            if (epoch == _rotationEpoch)
+            {
+                _rotationPollAt = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(ColituRotation.MinStatusPollSeconds);
+            }
+            Logging.SaveLog("ColituMainWindow.PollRotationAsync", ex);
+        }
+        finally
+        {
+            _rotationPolling = false;
+        }
+    }
+
+    /// <summary>The shown status is stale (new node, new preference): poll again as soon as allowed.</summary>
+    private void ResetRotationStatus()
+    {
+        _rotationStatus = null;
+        _rotationPollAt = DateTimeOffset.MinValue;
+        _rotationEpoch++;
+    }
+
+    private void ForgetRotationStatus()
+    {
+        if (_rotationStatus != null || _rotationNode != null)
+        {
+            _rotationNode = null;
+            ResetRotationStatus();
+        }
     }
 
     private async void ConnectButton_Click(object sender, RoutedEventArgs e) => await ToggleConnectionAsync();
@@ -203,6 +329,10 @@ public partial class ColituMainWindow
             ApplyAccount();
             ShowToast(Loc.I["err.noPlan"], true);
             Navigate("plan");
+        }
+        catch (ColituDevicePausedException paused)
+        {
+            await ShowPausedAsync(paused.Info);
         }
         catch (Exception ex)
         {
@@ -309,7 +439,8 @@ public partial class ColituMainWindow
         // Plan page strip
         CurrentPlanText.Text = active ? $"{PlanTitle(subscription!)} · {PlanDetailText(subscription!)}" : loc["plan.none"];
         SetBadge(CurrentPlanBadge, CurrentPlanBadgeText, status);
-        CreditText.Text = loc.Format("brand.credit", ("brand", "Avenlith"));
+        CreditText.Text = loc.Format("brand.credit", ("brand", "COLITU LIMITED"));
+        ApplyTrialBanner();
     }
 
     /// <summary>The free plan: 10 GB a month, renewed on the 1st.</summary>
@@ -401,13 +532,17 @@ public partial class ColituMainWindow
             HomeModeTun.IsChecked = SettingsModeTun.IsChecked = tun;
             HomeModeProxy.IsChecked = SettingsModeProxy.IsChecked = !tun;
             HomeKillSwitch.IsChecked = SettingsKillSwitch.IsChecked = preferences.KillSwitchEnabled;
+            SettingsKillSwitchLan.IsChecked = preferences.KillSwitchAllowLan;
             HomeAutoConnect.IsChecked = SettingsAutoConnect.IsChecked = preferences.AutoConnectEnabled;
             SettingsDns.IsChecked = preferences.DnsLeakProtectionEnabled;
             SettingsAdBlock.IsChecked = preferences.AdBlockEnabled;
             SettingsAdBlockRow.Visibility = ColituVpnService.AdBlockAvailable ? Visibility.Visible : Visibility.Collapsed;
+            SettingsPrivacy.IsChecked = preferences.PrivacyModeEnabled;
             SettingsTray.IsChecked = preferences.CloseToTray;
             SettingsStartup.IsChecked = _vpn.LaunchAtStartup;
             ApplyModeHint();
+            ApplySplitUi();
+            ApplyRotationUi();
         }
         finally
         {
@@ -434,7 +569,12 @@ public partial class ColituMainWindow
         {
             return;
         }
-        await SavePreferencesAsync(_vpn.Preferences with { ConnectionMode = normalized });
+        await SavePreferencesAsync(_vpn.Preferences with { ConnectionMode = normalized, TunModePromptShown = true });
+        if (normalized == ColituConnectionModes.Proxy)
+        {
+            // Said every time proxy mode is chosen: what it leaves unprotected.
+            ShowToast(Loc.I["proxy.coverage"], true);
+        }
     }
 
     private async void Preference_Click(object sender, RoutedEventArgs e)
@@ -449,7 +589,9 @@ public partial class ColituMainWindow
             : box == HomeAutoConnect || box == SettingsAutoConnect ? preferences with { AutoConnectEnabled = on }
             : box == SettingsDns ? preferences with { DnsLeakProtectionEnabled = on }
             : box == SettingsAdBlock ? preferences with { AdBlockEnabled = on }
+            : box == SettingsPrivacy ? preferences with { PrivacyModeEnabled = on, RuDirectNoticeShown = true }
             : box == SettingsTray ? preferences with { CloseToTray = on }
+            : box == SettingsKillSwitchLan ? preferences with { KillSwitchAllowLan = on }
             : preferences;
         await SavePreferencesAsync(preferences);
     }
@@ -461,6 +603,8 @@ public partial class ColituMainWindow
         var tunnelSettingsChanged = preferences.ConnectionMode != _vpn.Preferences.ConnectionMode
             || preferences.DnsLeakProtectionEnabled != _vpn.Preferences.DnsLeakProtectionEnabled
             || preferences.AdBlockEnabled != _vpn.Preferences.AdBlockEnabled
+            || preferences.PrivacyModeEnabled != _vpn.Preferences.PrivacyModeEnabled
+            || SplitSettingsChanged(preferences, _vpn.Preferences)
             || (preferences.IsTunMode && preferences.KillSwitchEnabled != _vpn.Preferences.KillSwitchEnabled);
         try
         {
@@ -474,7 +618,7 @@ public partial class ColituMainWindow
 
         if (tunnelSettingsChanged && _vpn.Status == ColituVpnStatus.Connected)
         {
-            // Mode, kill switch, DNS protection and ad blocking are part of the core config: reconnect to apply.
+            // Mode, kill switch, DNS protection, ad blocking and privacy mode are part of the core config: reconnect to apply.
             try
             {
                 await _vpn.ReconnectAsync();
@@ -489,5 +633,61 @@ public partial class ColituMainWindow
         {
             ShowToast(Loc.I["settings.saved"]);
         }
+    }
+
+    // ── Privacy mode (Russian sites outside the tunnel) ───────────────────
+    private const string SplitTunnelingDocPath = "split-tunneling";
+
+    /// <summary>
+    /// The chip under "Connected" while Russian sites leave outside the tunnel, and the one-time
+    /// notice the first time that happens (also for users who connected before this setting existed).
+    /// </summary>
+    private void ApplyRuDirectIndicator()
+    {
+        if (RuDirectChip == null)
+        {
+            return;
+        }
+        var active = _vpn.RussianSitesDirectActive;
+        RuDirectChip.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        RuDirectChipText.Text = Loc.I["privacy.chip"].ToUpper(Loc.I.Culture);
+        if (active && !_vpn.Preferences.RuDirectNoticeShown && RuDirectNotice.Visibility != Visibility.Visible)
+        {
+            RuDirectNotice.Visibility = Visibility.Visible;
+            FadeIn(RuDirectNotice, 8);
+        }
+        else if (!active && RuDirectNotice.Visibility == Visibility.Visible)
+        {
+            // Disconnected or switched to a Russian server before answering: ask next time.
+            RuDirectNotice.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void RuDirectChip_Click(object sender, MouseButtonEventArgs e)
+    {
+        Navigate("settings");
+        SettingsPrivacyRow.BringIntoView();
+    }
+
+    private void PrivacyScope_Click(object sender, RoutedEventArgs e) =>
+        OpenUrl($"https://docs.colitu.com/{Loc.I.Language}/{SplitTunnelingDocPath}");
+
+    private async void RuDirectNoticeKeep_Click(object sender, RoutedEventArgs e)
+    {
+        RuDirectNotice.Visibility = Visibility.Collapsed;
+        try
+        {
+            await _vpn.UpdatePreferencesAsync(_vpn.Preferences with { RuDirectNoticeShown = true });
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituMainWindow.RuDirectNoticeKeep_Click", ex);
+        }
+    }
+
+    private async void RuDirectNoticeEnable_Click(object sender, RoutedEventArgs e)
+    {
+        RuDirectNotice.Visibility = Visibility.Collapsed;
+        await SavePreferencesAsync(_vpn.Preferences with { PrivacyModeEnabled = true, RuDirectNoticeShown = true });
     }
 }

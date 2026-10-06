@@ -6,6 +6,9 @@ public class ProcessService : IDisposable
     private readonly Func<bool, string, Task>? _updateFunc;
     private bool _isDisposed;
 
+    /// <summary>The process ended, whatever the reason (also when stopped through this class).</summary>
+    public event EventHandler? Exited;
+
     public int Id => _process.Id;
     public IntPtr Handle => _process.Handle;
     public bool HasExited => _process.HasExited;
@@ -40,6 +43,7 @@ public class ProcessService : IDisposable
             },
             EnableRaisingEvents = true
         };
+        _process.Exited += (_, _) => Exited?.Invoke(this, EventArgs.Empty);
 
         if (environmentVars != null)
         {

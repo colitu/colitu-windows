@@ -1,12 +1,15 @@
 #define MyAppName "Colitu VPN"
 #define MyAppExeName "ColituVPN.exe"
-#define MyAppPublisher "Colitu"
+#define MyAppPublisher "COLITU LIMITED"
 #define MyAppURL "https://colitu.com"
+; The kill-switch service: persistent firewall filters that survive a crash of the app (2.6.0).
+#define KsServiceName "ColituKillSwitch"
+#define KsServiceExe "ColituKillSwitchService.exe"
 
 #if GetEnv("COLITU_APP_VERSION") != ""
   #define MyAppVersion GetEnv("COLITU_APP_VERSION")
 #else
-  #define MyAppVersion "2.5.5"
+  #define MyAppVersion "2.6.0"
 #endif
 
 #if GetEnv("COLITU_PUBLISH_DIR") != ""
@@ -83,9 +86,15 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /F"; Flags: runhidden waituntilterminated; RunOnceId: "KillColituVPN"
-; Hands the system proxy back and removes the sign-in task; without it an uninstall while
-; connected leaves every browser pointing at a local proxy that no longer exists.
+; Hands the system proxy back, removes the sign-in task and asks the kill-switch service to remove
+; every Colitu firewall object; without it an uninstall while connected leaves the computer offline
+; or every browser pointing at a local proxy that no longer exists.
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--colitu-cleanup"; Flags: runhidden waituntilterminated; RunOnceId: "ColituCleanup"
+; Then the service itself: stop it (waits), remove whatever firewall objects are still there (also
+; when the service was already gone or broken), and delete it.
+Filename: "{sys}\net.exe"; Parameters: "stop {#KsServiceName}"; Flags: runhidden waituntilterminated; RunOnceId: "StopKillSwitch"
+Filename: "{app}\{#KsServiceExe}"; Parameters: "--remove-all"; Flags: runhidden waituntilterminated skipifdoesntexist; RunOnceId: "RemoveKillSwitchFilters"
+Filename: "{sys}\sc.exe"; Parameters: "delete {#KsServiceName}"; Flags: runhidden waituntilterminated; RunOnceId: "DeleteKillSwitch"
 
 [UninstallDelete]
 ; Created at runtime: sessions, cached settings, logs, generated core configs, downloaded updates.
@@ -96,6 +105,9 @@ Type: filesandordirs; Name: "{app}\binConfigs"
 Type: filesandordirs; Name: "{app}\guiBackups"
 Type: filesandordirs; Name: "{app}\guiUpdates"
 Type: filesandordirs; Name: "{app}\bin"
+; The kill-switch service's state and log (SYSTEM and administrators only).
+Type: filesandordirs; Name: "{commonappdata}\Colitu VPN\KillSwitch"
+Type: dirifempty; Name: "{commonappdata}\Colitu VPN"
 
 [Code]
 // Runs once the user clicked Install (not when the wizard opens): cancelling the wizard
@@ -105,7 +117,28 @@ var
   ResultCode: Integer;
 begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM {#MyAppExeName} /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // Upgrade: stop the kill-switch service so its file can be replaced. Its firewall filters stay
+  // in place while it is stopped (an armed switch keeps protecting during the update).
+  Exec(ExpandConstant('{sys}\net.exe'), 'stop {#KsServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := '';
+end;
+
+// Creates the service on a new install, points an existing one at this folder on an upgrade,
+// and starts it. LocalSystem (WFP needs it), automatic start, restarted if it ever crashes.
+procedure InstallKillSwitchService();
+var
+  ResultCode: Integer;
+  BinPath: String;
+begin
+  BinPath := '"' + ExpandConstant('{app}\{#KsServiceExe}') + '"';
+  if not Exec(ExpandConstant('{sys}\sc.exe'), 'create {#KsServiceName} binPath= "' + BinPath + '" start= auto obj= LocalSystem DisplayName= "Colitu VPN kill switch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  begin
+    // 1073 = the service exists (upgrade): update its path and start type instead.
+    Exec(ExpandConstant('{sys}\sc.exe'), 'config {#KsServiceName} binPath= "' + BinPath + '" start= auto obj= LocalSystem', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+  Exec(ExpandConstant('{sys}\sc.exe'), 'description {#KsServiceName} "Keeps traffic from leaving outside Colitu VPN while the kill switch is on, also if the app or the VPN core stops unexpectedly."', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'failure {#KsServiceName} reset= 86400 actions= restart/2000/restart/5000/restart/30000', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\sc.exe'), 'start {#KsServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 // The app and its cores run elevated (and at sign-in without a UAC prompt), so ordinary
@@ -120,5 +153,7 @@ begin
     Exec(ExpandConstant('{sys}\icacls.exe'),
       '"' + ExpandConstant('{app}') + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // After the folder is locked down: the service runs as LocalSystem from here.
+    InstallKillSwitchService();
   end;
 end;

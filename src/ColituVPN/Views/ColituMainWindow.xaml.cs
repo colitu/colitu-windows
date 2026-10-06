@@ -113,6 +113,12 @@ public partial class ColituMainWindow
             return;
         }
         var state = await initialize;
+        if (state == ColituStartupState.DevicePaused)
+        {
+            await EnterAppAsync(offline: false);
+            await ShowPausedAsync(_auth.DevicePaused);
+            return;
+        }
         if (state == ColituStartupState.VerificationRequired)
         {
             ShowVerify(codeJustSent: false);
@@ -145,6 +151,9 @@ public partial class ColituMainWindow
                     break;
                 case ColituStartupState.VerificationRequired:
                     ShowVerify(codeJustSent: false);
+                    break;
+                case ColituStartupState.DevicePaused:
+                    await ShowPausedAsync(_auth.DevicePaused);
                     break;
                 case ColituStartupState.SignedIn when _offline && _auth.HasSession:
                     _offline = false;
@@ -179,9 +188,19 @@ public partial class ColituMainWindow
         // (up to 40 s more when it is slow). A plan that has run out is reported by the connect.
         // Not awaited: sign-in, verification and reset screens finish right away instead of
         // waiting (with a spinner) until the tunnel is up.
-        if (!_planRequired || offline)
+        if ((!_planRequired || offline) && _auth.DevicePaused == null)
         {
             _ = AutoConnectAsync();
+        }
+        else
+        {
+            // No auto-connect will come for a connection the kill switch held the internet for.
+            _ = _vpn.ReleaseHeldKillSwitchAsync("no auto-connect (no plan or paused device)");
+        }
+        // Proxy-mode users from before 2.6.0 are asked once about TUN mode (never switched silently).
+        if (_vpn.ShouldOfferTunMode && _auth.DevicePaused == null)
+        {
+            ShowTunPrompt();
         }
 
         if (offline)
@@ -277,6 +296,11 @@ public partial class ColituMainWindow
             // Signed out while this ran; nothing to show.
             return false;
         }
+        catch (ColituApiException ex) when (ex.ErrorCode is "DEVICE_OVER_LIMIT")
+        {
+            await ShowPausedAsync(ex.OverLimit);
+            return false;
+        }
         catch (ColituApiException ex) when (ex.Terminal)
         {
             await OnSessionExpiredAsync();
@@ -336,7 +360,7 @@ public partial class ColituMainWindow
     // ── Views and navigation ───────────────────────────────────────────────
     private void ShowView(FrameworkElement view)
     {
-        foreach (var candidate in new FrameworkElement[] { LoadingView, AuthView, ResetView, VerifyView, AppView })
+        foreach (var candidate in new FrameworkElement[] { LoadingView, AuthView, ResetView, VerifyView, MfaView, AppView })
         {
             candidate.Visibility = candidate == view ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -480,6 +504,8 @@ public partial class ColituMainWindow
         BuildCategoryFilter();
         RenderServers();
         ApplyVerifyTexts();
+        ApplyMfaTexts();
+        ApplySplitUi();
         RenderSupportList();
         _ = LoadDevicesAsync();
         Dispatcher.BeginInvoke(() => MoveNavThumb(false), DispatcherPriority.Loaded);

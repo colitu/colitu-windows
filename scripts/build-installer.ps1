@@ -1,7 +1,7 @@
 param(
     [string]$Configuration = "Release",
     [string]$Runtime = "win-x64",
-    [string]$Version = "2.5.5",
+    [string]$Version = "2.6.0",
     [switch]$SkipPublish,
     # ECDSA P-256 private key (PKCS#8 PEM) that signs latest.json. Keep it off the repository;
     # the app only installs updates whose manifest verifies against the embedded public key.
@@ -28,6 +28,7 @@ if (-not ((& $dotnet --list-sdks) -match '^10\.')) {
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $projectPath = Join-Path $repoRoot "src\ColituVPN\ColituVPN.csproj"
+$serviceProjectPath = Join-Path $repoRoot "src\ColituKillSwitchService\ColituKillSwitchService.csproj"
 $issPath = Join-Path $repoRoot "installer\ColituVPN.iss"
 $publishDir = Join-Path $repoRoot "artifacts\publish\ColituVPN\$Runtime"
 $installerDir = Join-Path $repoRoot "artifacts\installer"
@@ -102,7 +103,26 @@ if (-not $SkipPublish) {
         -o $publishDir
 }
 
+if (-not $SkipPublish) {
+    # The kill-switch service (LocalSystem): a trimmed self-contained single file next to the app,
+    # installed and started by the installer.
+    Write-Host "Publishing kill-switch service..." -ForegroundColor Cyan
+    & $dotnet publish $serviceProjectPath `
+        --configuration $Configuration `
+        --runtime $Runtime `
+        --self-contained true `
+        -p:Version=$Version `
+        -p:AssemblyVersion=$Version `
+        -p:FileVersion=$Version `
+        -p:InformationalVersion=$Version `
+        -p:PublishSingleFile=true `
+        -p:PublishTrimmed=true `
+        -p:EnableCompressionInSingleFile=true `
+        -o $publishDir
+}
+
 Assert-FileExists (Join-Path $publishDir "ColituVPN.exe") "Published ColituVPN.exe"
+Assert-FileExists (Join-Path $publishDir "ColituKillSwitchService.exe") "Published ColituKillSwitchService.exe"
 
 $binXrayDir = Join-Path $publishDir "bin\xray"
 $setupFallbackDir = Join-Path $publishDir "xray-dosyalari"

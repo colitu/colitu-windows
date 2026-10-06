@@ -81,6 +81,49 @@
                 </Grid>
             </DataTemplate>
 
+            <!-- Two overlapping round flags: entry node, then exit node of a multihop route. -->
+            <DataTemplate x:Key="FlagPairTemplate">
+                <Grid Width="56" Height="34">
+                    <Grid Width="30" Height="30" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <Ellipse Fill="{StaticResource IconWellBrush}" />
+                        <Grid Width="30" Height="30">
+                            <Grid.Clip>
+                                <EllipseGeometry Center="15,15" RadiusX="15" RadiusY="15" />
+                            </Grid.Clip>
+                            <svgc:SvgViewbox Width="30" Height="30" Source="{Binding EntryFlagUri}" Stretch="Uniform" />
+                        </Grid>
+                        <Ellipse Stroke="#26FFFFFF" StrokeThickness="1" />
+                    </Grid>
+                    <Grid Width="30" Height="30" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Ellipse Fill="{StaticResource IconWellBrush}" />
+                        <Grid Width="30" Height="30">
+                            <Grid.Clip>
+                                <EllipseGeometry Center="15,15" RadiusX="15" RadiusY="15" />
+                            </Grid.Clip>
+                            <svgc:SvgViewbox Width="30" Height="30" Source="{Binding ExitFlagUri}" Stretch="Uniform" />
+                        </Grid>
+                        <Ellipse Stroke="#26FFFFFF" StrokeThickness="1" />
+                    </Grid>
+                </Grid>
+            </DataTemplate>
+
+            <!-- A section title in the locations list (e.g. Multihop): no card, not selectable. -->
+            <Style x:Key="ServerListItem" TargetType="ListBoxItem" BasedOn="{StaticResource ServerItem}">
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsHeader}" Value="True">
+                        <Setter Property="Cursor" Value="Arrow" />
+                        <Setter Property="Margin" Value="0,12,0,8" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <ContentPresenter />
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
             <DataTemplate x:Key="SupportRowTemplate">
                 <Grid Margin="2,2">
                     <Grid.RowDefinitions>
@@ -106,13 +149,21 @@
 
             <DataTemplate x:Key="ServerRowTemplate">
                 <Grid>
+                    <StackPanel Margin="4,0,0,0" Visibility="{Binding HeaderVisibility}">
+                        <TextBlock Style="{StaticResource Kicker}" Text="{Binding Title}" />
+                        <TextBlock Margin="0,4,0,0" Style="{StaticResource Small}" Text="{Binding HeaderHint}" TextWrapping="Wrap" Visibility="{Binding HeaderHintVisibility}" />
+                    </StackPanel>
+                    <Grid Visibility="{Binding RowVisibility}">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FlagTemplate}" />
+                    <Grid VerticalAlignment="Center">
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FlagTemplate}" Visibility="{Binding SingleFlagVisibility}" />
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FlagPairTemplate}" Visibility="{Binding PairFlagVisibility}" />
+                    </Grid>
                     <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
@@ -125,7 +176,11 @@
                     </StackPanel>
                     <!-- Ping from this PC (measured outside the tunnel) with signal bars; the load is in the tooltip. -->
                     <StackPanel Grid.Column="2" Margin="0,0,16,0" VerticalAlignment="Center" Orientation="Horizontal" ToolTip="{Binding PingToolTip}" Visibility="{Binding PingVisibility}">
-                        <TextBlock MinWidth="52" Margin="0,0,10,0" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Foreground="{Binding PingTextBrush}" Text="{Binding PingText}" TextAlignment="Right" />
+                        <StackPanel Margin="0,0,10,0" VerticalAlignment="Center">
+                            <TextBlock MinWidth="52" FontSize="13" FontWeight="SemiBold" Foreground="{Binding PingTextBrush}" Text="{Binding PingText}" TextAlignment="Right" />
+                            <!-- A route's ping is measured to its entry node only. -->
+                            <TextBlock Margin="0,1,0,0" FontSize="10.5" Foreground="{StaticResource MutedBrush}" Text="{Binding PingNote}" TextAlignment="Right" Visibility="{Binding PingNoteVisibility}" />
+                        </StackPanel>
                         <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
                             <Border Width="4" Height="8" Margin="0,0,3,0" VerticalAlignment="Bottom" Background="{Binding PingBar1}" CornerRadius="2" />
                             <Border Width="4" Height="12" Margin="0,0,3,0" VerticalAlignment="Bottom" Background="{Binding PingBar2}" CornerRadius="2" />
@@ -135,6 +190,7 @@
                     <Border Grid.Column="3" MinWidth="92" Style="{StaticResource Badge}" Visibility="{Binding StateVisibility}" Background="{Binding StateBackground}">
                         <TextBlock HorizontalAlignment="Center" Foreground="{Binding StateForeground}" Style="{StaticResource BadgeText}" Text="{Binding StateText}" />
                     </Border>
+                    </Grid>
                 </Grid>
             </DataTemplate>
         </ResourceDictionary>
@@ -348,6 +404,39 @@
             </Border>
         </Grid>
 
+        <!-- ── Two-factor code (2FA is set up on colitu.com only) ─────────────── -->
+        <Grid x:Name="MfaView" Visibility="Collapsed">
+            <Border Width="468" Padding="38,36" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Panel}">
+                <StackPanel x:Name="MfaCard">
+                    <Grid Width="64" Height="64" HorizontalAlignment="Left">
+                        <Ellipse Fill="{StaticResource IconWellBrush}" Stroke="{StaticResource LineStrongBrush}" StrokeThickness="1" />
+                        <Path Width="26" Height="26" Data="{StaticResource IconShield}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.8" />
+                    </Grid>
+                    <TextBlock Margin="0,24,0,0" Style="{StaticResource Kicker}" Text="{s:T mfa.kicker}" />
+                    <TextBlock Margin="0,10,0,0" Style="{StaticResource H1}" Text="{s:T mfa.title}" />
+                    <TextBlock x:Name="MfaSubtitle" Margin="0,10,0,0" Style="{StaticResource Muted}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="MfaCodeLabel" Margin="2,26,0,8" Style="{StaticResource FieldLabel}" />
+                    <TextBox x:Name="MfaCodeBox" Height="66" Padding="16,0" FontSize="30" FontWeight="SemiBold" InputMethod.IsInputMethodEnabled="False" DataObject.Pasting="MfaCode_Pasting" KeyDown="MfaCode_KeyDown" MaxLength="6" PreviewTextInput="MfaCode_PreviewTextInput" TextChanged="MfaCode_TextChanged" Style="{StaticResource Field}" TextAlignment="Center" />
+                    <Border x:Name="MfaErrorBox" Margin="0,16,0,0" Padding="14,10" Background="#1AFF6B7A" BorderBrush="#59FF6B7A" BorderThickness="1" CornerRadius="16" Visibility="Collapsed">
+                        <TextBlock x:Name="MfaErrorText" FontSize="13" Foreground="#FFA3AE" TextWrapping="Wrap" />
+                    </Border>
+                    <Button x:Name="MfaSubmitButton" Height="52" Margin="0,20,0,0" HorizontalAlignment="Stretch" Click="MfaSubmit_Click" Style="{StaticResource PrimaryButton}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="MfaSpinner" Margin="0,0,10,0" Stroke="{StaticResource OnAccentBrush}" Style="{StaticResource Spinner}" Visibility="Collapsed" />
+                            <TextBlock FontSize="15.5" Text="{s:T mfa.submit}" />
+                        </StackPanel>
+                    </Button>
+                    <Grid Margin="0,18,0,0">
+                        <Button x:Name="MfaModeButton" HorizontalAlignment="Left" Click="MfaMode_Click" Style="{StaticResource LinkButton}">
+                            <TextBlock x:Name="MfaModeText" />
+                        </Button>
+                        <Button HorizontalAlignment="Right" Click="MfaBack_Click" Content="{s:T mfa.back}" Style="{StaticResource LinkButton}" />
+                    </Grid>
+                    <TextBlock Margin="0,20,0,0" Style="{StaticResource Small}" Text="{s:T mfa.hint}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
         <!-- ── Signed-in app ─────────────────────────────────────────────────── -->
         <Grid x:Name="AppView" Visibility="Collapsed">
             <Grid.RowDefinitions>
@@ -503,12 +592,48 @@
                             <Border x:Name="ProtocolChip" Margin="0,14,0,0" HorizontalAlignment="Center" Style="{StaticResource Chip}" Visibility="Collapsed">
                                 <TextBlock x:Name="ProtocolChipText" Style="{StaticResource ChipText}" />
                             </Border>
+                            <!-- Multihop: "Entry FI to Exit DE"; rotating IP: current exit and the countdown to the next change. -->
+                            <Border x:Name="RouteChip" Margin="0,8,0,0" HorizontalAlignment="Center" Style="{StaticResource Chip}" Visibility="Collapsed">
+                                <TextBlock x:Name="RouteChipText" Style="{StaticResource ChipText}" />
+                            </Border>
+                            <!-- Russian sites leave outside the tunnel (privacy mode off, server outside Russia); opens the setting. -->
+                            <Border x:Name="RuDirectChip" Margin="0,8,0,0" HorizontalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="RuDirectChip_Click" Style="{StaticResource Chip}" Visibility="Collapsed">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Width="11" Height="12" Margin="0,0,7,0" VerticalAlignment="Center" Data="{StaticResource IconShield}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    <TextBlock x:Name="RuDirectChipText" Style="{StaticResource ChipText}" />
+                                </StackPanel>
+                            </Border>
+                            <!-- Split tunnelling active; opens the setting. -->
+                            <Border x:Name="SplitChip" Margin="0,8,0,0" HorizontalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="SplitChip_Click" Style="{StaticResource Chip}" Visibility="Collapsed">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Width="12" Height="12" Margin="0,0,7,0" VerticalAlignment="Center" Data="{StaticResource IconChevron}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    <TextBlock x:Name="SplitChipText" Style="{StaticResource ChipText}" />
+                                </StackPanel>
+                            </Border>
+                            <!-- Proxy mode in effect: not everything is protected; opens the mode setting. -->
+                            <Border x:Name="ProxyCoverageChip" Margin="0,8,0,0" HorizontalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="ProxyCoverageChip_Click" Style="{StaticResource Chip}" Visibility="Collapsed">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path Width="11" Height="12" Margin="0,0,7,0" VerticalAlignment="Center" Data="{StaticResource IconShield}" Stretch="Uniform" Stroke="#F5C36B" StrokeLineJoin="Round" StrokeThickness="1.6" />
+                                    <TextBlock x:Name="ProxyCoverageChipText" Style="{StaticResource ChipText}" />
+                                </StackPanel>
+                            </Border>
                             <Button x:Name="UnblockButton" Margin="0,12,0,0" HorizontalAlignment="Center" Click="Unblock_Click" Content="{s:T home.unblock}" Style="{StaticResource LinkButton}" Visibility="Collapsed" />
                         </StackPanel>
                     </Grid>
 
                     <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="HomeCards">
+                            <!-- Trial ends within 3 days (dismissible per day). -->
+                            <Border x:Name="TrialBanner" Margin="0,0,0,16" Padding="18,16" Background="#149F8CFF" BorderBrush="#599F8CFF" BorderThickness="1" CornerRadius="20" Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock x:Name="TrialBannerText" FontSize="13.5" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
+                                    <WrapPanel Margin="0,10,0,0">
+                                        <Button Margin="0,0,18,0" Click="TrialKeep_Click" Content="{s:T trial.keep}" Style="{StaticResource LinkButton}" />
+                                        <Button Click="TrialDismiss_Click" Content="{s:T trial.dismiss}" Style="{StaticResource LinkButton}" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+
                             <!-- Location -->
                             <Border Cursor="Hand" MouseLeftButtonUp="LocationCard_Click" Style="{StaticResource Panel}" Padding="20">
                                 <StackPanel>
@@ -619,7 +744,7 @@
                         <StackPanel x:Name="CategoryList" Orientation="Horizontal" />
                     </Border>
                     <Grid Grid.Row="2">
-                        <ListBox x:Name="ServerList" ItemTemplate="{StaticResource ServerRowTemplate}" SelectionChanged="ServerList_SelectionChanged" Style="{StaticResource PlainList}" />
+                        <ListBox x:Name="ServerList" ItemContainerStyle="{StaticResource ServerListItem}" ItemTemplate="{StaticResource ServerRowTemplate}" SelectionChanged="ServerList_SelectionChanged" Style="{StaticResource PlainList}" />
                         <TextBlock x:Name="ServerListEmpty" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Muted}" Visibility="Collapsed" />
                     </Grid>
                 </Grid>
@@ -735,6 +860,12 @@
                                             <Button Height="42" Margin="0,0,10,10" Padding="18,0" Click="ManageAccount_Click" Style="{StaticResource SecondaryButton}">
                                                 <TextBlock FontSize="13.5" Text="{s:T account.manage}" />
                                             </Button>
+                                            <Button Height="42" Margin="0,0,10,10" Padding="18,0" Click="Security_Click" Style="{StaticResource SecondaryButton}">
+                                                <TextBlock FontSize="13.5" Text="{s:T account.security}" />
+                                            </Button>
+                                            <Button Height="42" Margin="0,0,10,10" Padding="18,0" Click="ManualConfig_Click" Style="{StaticResource SecondaryButton}">
+                                                <TextBlock FontSize="13.5" Text="{s:T account.manualConfig}" />
+                                            </Button>
                                             <Button Height="42" Margin="0,0,10,10" Padding="18,0" Click="SignOut_Click" Style="{StaticResource DangerButton}">
                                                 <TextBlock FontSize="13.5" Text="{s:T account.signOut}" />
                                             </Button>
@@ -782,12 +913,19 @@
                                                                 <Border Margin="8,0,0,0" Style="{StaticResource Badge}" Padding="7,2" Visibility="{Binding CurrentVisibility}">
                                                                     <TextBlock FontSize="9.5" Style="{StaticResource BadgeText}" Text="{s:T account.thisDevice}" />
                                                                 </Border>
+                                                                <!-- Paused by the plan's device limit (suspended_reason over_limit). -->
+                                                                <Border Margin="8,0,0,0" Padding="7,2" Background="#26F5C36B" CornerRadius="8" Visibility="{Binding PausedVisibility}">
+                                                                    <TextBlock FontSize="9.5" FontWeight="Bold" Foreground="#F5C36B" Text="{s:T account.paused}" />
+                                                                </Border>
                                                             </StackPanel>
                                                             <TextBlock Margin="0,2,0,0" FontSize="12" Foreground="{StaticResource MutedBrush}" Text="{Binding Detail}" />
                                                         </StackPanel>
-                                                        <Button Grid.Column="2" Click="RemoveDevice_Click" Style="{StaticResource IconButton}" Tag="{Binding}" ToolTip="{s:T account.remove}">
-                                                            <Path Width="12" Height="12" Data="{StaticResource IconX}" Style="{StaticResource Stroke}" />
-                                                        </Button>
+                                                        <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                                            <Button Margin="0,0,6,0" VerticalAlignment="Center" Click="ActivateDevice_Click" Content="{s:T account.activate}" FontSize="12.5" Style="{StaticResource LinkButton}" Tag="{Binding}" Visibility="{Binding PausedVisibility}" />
+                                                            <Button Click="RemoveDevice_Click" Style="{StaticResource IconButton}" Tag="{Binding}" ToolTip="{s:T account.remove}">
+                                                                <Path Width="12" Height="12" Data="{StaticResource IconX}" Style="{StaticResource Stroke}" />
+                                                            </Button>
+                                                        </StackPanel>
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
@@ -841,6 +979,17 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Margin="0,0,16,0">
+                                                <TextBlock FontSize="14.5" FontWeight="Medium" Text="{s:T settings.killSwitchLan}" />
+                                                <TextBlock Margin="0,3,0,0" Style="{StaticResource Small}" Text="{s:T settings.killSwitchLanHint}" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="SettingsKillSwitchLan" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
+                                        </Grid>
+                                        <Grid Margin="0,18,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,16,0">
                                                 <TextBlock FontSize="14.5" FontWeight="Medium" Text="{s:T settings.dns}" />
                                                 <TextBlock Margin="0,3,0,0" Style="{StaticResource Small}" Text="{s:T settings.dnsHint}" />
                                             </StackPanel>
@@ -857,6 +1006,18 @@
                                             </StackPanel>
                                             <CheckBox x:Name="SettingsAdBlock" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
                                         </Grid>
+                                        <Grid x:Name="SettingsPrivacyRow" Margin="0,18,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,16,0">
+                                                <TextBlock FontSize="14.5" FontWeight="Medium" Text="{s:T privacy.title}" />
+                                                <TextBlock Margin="0,3,0,0" Style="{StaticResource Small}" Text="{s:T privacy.hint}" />
+                                                <Button Margin="0,6,0,0" HorizontalAlignment="Left" Click="PrivacyScope_Click" Content="{s:T privacy.scope}" FontSize="12.5" Style="{StaticResource LinkButton}" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="SettingsPrivacy" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
+                                        </Grid>
                                         <Grid Margin="0,18,0,0">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -869,6 +1030,72 @@
                                             <CheckBox x:Name="SettingsAutoConnect" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
                                         </Grid>
                                         <TextBlock x:Name="SettingsNote" Margin="0,16,0,0" FontSize="12.5" Foreground="{StaticResource LilacBrush}" Visibility="Collapsed" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Split tunnelling -->
+                                <Border x:Name="SplitCard" Margin="0,16,0,0" Padding="24" Style="{StaticResource Panel}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource H2}" Text="{s:T split.title}" />
+                                        <TextBlock Margin="0,6,0,0" Style="{StaticResource Small}" Text="{s:T split.hint}" TextWrapping="Wrap" />
+                                        <Border Margin="0,16,0,0" Style="{StaticResource SegmentHost}">
+                                            <UniformGrid Rows="1">
+                                                <RadioButton x:Name="SplitModeOff" Checked="SplitMode_Checked" Content="{s:T split.mode.off}" GroupName="SplitMode" FontSize="12.5" Style="{StaticResource SegmentOption}" Tag="off" />
+                                                <RadioButton x:Name="SplitModeBypass" Checked="SplitMode_Checked" Content="{s:T split.mode.bypass}" GroupName="SplitMode" FontSize="12.5" Style="{StaticResource SegmentOption}" Tag="bypass" />
+                                                <RadioButton x:Name="SplitModeOnly" Checked="SplitMode_Checked" Content="{s:T split.mode.only}" GroupName="SplitMode" FontSize="12.5" Style="{StaticResource SegmentOption}" Tag="only" />
+                                            </UniformGrid>
+                                        </Border>
+                                        <TextBlock x:Name="SplitModeHint" Margin="2,10,0,0" Style="{StaticResource Small}" TextWrapping="Wrap" />
+                                        <StackPanel x:Name="SplitLists">
+                                            <TextBlock Margin="2,18,0,8" Style="{StaticResource FieldLabel}" Text="{s:T split.apps}" />
+                                            <TextBlock x:Name="SplitProxyNote" Margin="2,0,0,8" FontSize="12.5" Foreground="#F5C36B" Text="{s:T split.proxyNote}" TextWrapping="Wrap" Visibility="Collapsed" />
+                                            <ItemsControl x:Name="SplitAppsList" />
+                                            <Button Margin="0,6,0,0" HorizontalAlignment="Left" Click="SplitAddApp_Click" Content="{s:T split.addApp}" Style="{StaticResource LinkButton}" />
+
+                                            <TextBlock Margin="2,18,0,8" Style="{StaticResource FieldLabel}" Text="{s:T split.sites}" />
+                                            <ItemsControl x:Name="SplitDomainsList" />
+                                            <Grid Margin="0,6,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="SplitDomainBox" MaxLength="253" KeyDown="SplitDomainBox_KeyDown" Style="{StaticResource Field}" Tag="{s:T split.domainHint}" />
+                                                <Button Grid.Column="1" Height="44" Margin="10,0,0,0" Padding="16,0" Click="SplitAddDomain_Click" Style="{StaticResource SecondaryButton}">
+                                                    <TextBlock FontSize="13" Text="{s:T split.add}" />
+                                                </Button>
+                                            </Grid>
+
+                                            <TextBlock Margin="2,18,0,8" Style="{StaticResource FieldLabel}" Text="{s:T split.ips}" />
+                                            <ItemsControl x:Name="SplitNetworksList" />
+                                            <Grid Margin="0,6,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBox x:Name="SplitNetworkBox" MaxLength="50" KeyDown="SplitNetworkBox_KeyDown" Style="{StaticResource Field}" Tag="{s:T split.ipHint}" />
+                                                <Button Grid.Column="1" Height="44" Margin="10,0,0,0" Padding="16,0" Click="SplitAddNetwork_Click" Style="{StaticResource SecondaryButton}">
+                                                    <TextBlock FontSize="13" Text="{s:T split.add}" />
+                                                </Button>
+                                            </Grid>
+                                            <TextBlock x:Name="SplitError" Margin="2,10,0,0" FontSize="12.5" Foreground="#FFA3AE" TextWrapping="Wrap" Visibility="Collapsed" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Rotating exit IP (panel: /me/rotation) -->
+                                <Border x:Name="RotationCard" Margin="0,16,0,0" Padding="24" Style="{StaticResource Panel}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource H2}" Text="{s:T rotation.title}" />
+                                        <TextBlock Margin="0,6,0,0" Style="{StaticResource Small}" Text="{s:T rotation.hint}" TextWrapping="Wrap" />
+                                        <Border Margin="0,16,0,0" Style="{StaticResource SegmentHost}">
+                                            <UniformGrid x:Name="RotationIntervals" Rows="1" />
+                                        </Border>
+                                        <StackPanel x:Name="RotationCountriesPanel" Visibility="Collapsed">
+                                            <TextBlock Margin="2,18,0,4" Style="{StaticResource FieldLabel}" Text="{s:T rotation.countries}" />
+                                            <TextBlock Margin="2,0,0,8" Style="{StaticResource Small}" Text="{s:T rotation.countriesHint}" TextWrapping="Wrap" />
+                                            <WrapPanel x:Name="RotationCountries" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="RotationNote" Margin="2,10,0,0" FontSize="12.5" Foreground="#FFA3AE" TextWrapping="Wrap" Visibility="Collapsed" />
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -1105,6 +1332,70 @@
                     </Grid>
                 </Grid>
             </Grid>
+        </Grid>
+
+        <!-- ── Russian sites outside the tunnel: one-time notice after the first such connection ── -->
+        <Grid x:Name="RuDirectNotice" Background="#B3050508" Visibility="Collapsed">
+            <Border Width="480" Padding="34,32" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Panel}">
+                <StackPanel>
+                    <Grid Width="56" Height="56" HorizontalAlignment="Left">
+                        <Ellipse Fill="{StaticResource IconWellBrush}" Stroke="{StaticResource LineStrongBrush}" StrokeThickness="1" />
+                        <Path Width="22" Height="22" Data="{StaticResource IconShield}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.8" />
+                    </Grid>
+                    <TextBlock Margin="0,20,0,0" Style="{StaticResource H2}" Text="{s:T privacy.notice.title}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,10,0,0" Style="{StaticResource Muted}" Text="{s:T privacy.notice.body}" TextWrapping="Wrap" />
+                    <Button Margin="0,12,0,0" HorizontalAlignment="Left" Click="PrivacyScope_Click" Content="{s:T privacy.details}" Style="{StaticResource LinkButton}" />
+                    <Button Height="50" Margin="0,20,0,0" HorizontalAlignment="Stretch" Click="RuDirectNoticeKeep_Click" Style="{StaticResource PrimaryButton}">
+                        <TextBlock FontSize="15" Text="{s:T privacy.notice.keep}" />
+                    </Button>
+                    <Button Height="46" Margin="0,10,0,0" HorizontalAlignment="Stretch" Click="RuDirectNoticeEnable_Click" Content="{s:T privacy.notice.enable}" Style="{StaticResource SecondaryButton}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ── This device is paused by the plan's device limit ──────────────── -->
+        <Grid x:Name="PausedPrompt" Background="#B3050508" Visibility="Collapsed">
+            <Border Width="480" Padding="34,32" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Panel}">
+                <StackPanel>
+                    <Grid Width="56" Height="56" HorizontalAlignment="Left">
+                        <Ellipse Fill="{StaticResource IconWellBrush}" Stroke="{StaticResource LineStrongBrush}" StrokeThickness="1" />
+                        <Path Width="22" Height="22" Data="{StaticResource IconDevice}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.8" />
+                    </Grid>
+                    <TextBlock Margin="0,20,0,0" Style="{StaticResource Kicker}" Text="{s:T paused.kicker}" />
+                    <TextBlock Margin="0,8,0,0" Style="{StaticResource H2}" Text="{s:T paused.title}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="PausedBody" Margin="0,10,0,0" Style="{StaticResource Muted}" TextWrapping="Wrap" />
+                    <Border x:Name="PausedErrorBox" Margin="0,14,0,0" Padding="14,10" Background="#1AFF6B7A" BorderBrush="#59FF6B7A" BorderThickness="1" CornerRadius="16" Visibility="Collapsed">
+                        <TextBlock x:Name="PausedErrorText" FontSize="13" Foreground="#FFA3AE" TextWrapping="Wrap" />
+                    </Border>
+                    <Button x:Name="PausedUseThisButton" Height="50" Margin="0,22,0,0" HorizontalAlignment="Stretch" Click="PausedUseThis_Click" Style="{StaticResource PrimaryButton}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="PausedSpinner" Margin="0,0,10,0" Stroke="{StaticResource OnAccentBrush}" Style="{StaticResource Spinner}" Visibility="Collapsed" />
+                            <TextBlock FontSize="15" Text="{s:T paused.useThis}" />
+                        </StackPanel>
+                    </Button>
+                    <TextBlock x:Name="PausedUseThisHint" Margin="2,8,0,0" Style="{StaticResource Small}" Text="{s:T paused.useThisHint}" TextWrapping="Wrap" />
+                    <Button Height="46" Margin="0,14,0,0" HorizontalAlignment="Stretch" Click="PausedPremium_Click" Content="{s:T paused.premium}" Style="{StaticResource SecondaryButton}" />
+                    <Button Margin="0,14,0,0" HorizontalAlignment="Left" Click="PausedSignOut_Click" Content="{s:T paused.signOut}" Style="{StaticResource LinkButton}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ── Proxy-mode users from before 2.6.0: asked once about TUN mode ── -->
+        <Grid x:Name="TunPrompt" Background="#B3050508" Visibility="Collapsed">
+            <Border Width="480" Padding="34,32" HorizontalAlignment="Center" VerticalAlignment="Center" Style="{StaticResource Panel}">
+                <StackPanel>
+                    <Grid Width="56" Height="56" HorizontalAlignment="Left">
+                        <Ellipse Fill="{StaticResource IconWellBrush}" Stroke="{StaticResource LineStrongBrush}" StrokeThickness="1" />
+                        <Path Width="22" Height="22" Data="{StaticResource IconShield}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.8" />
+                    </Grid>
+                    <TextBlock Margin="0,20,0,0" Style="{StaticResource H2}" Text="{s:T tun.prompt.title}" TextWrapping="Wrap" />
+                    <TextBlock Margin="0,10,0,0" Style="{StaticResource Muted}" Text="{s:T tun.prompt.body}" TextWrapping="Wrap" />
+                    <Button Height="50" Margin="0,22,0,0" HorizontalAlignment="Stretch" Click="TunPromptSwitch_Click" Style="{StaticResource PrimaryButton}">
+                        <TextBlock FontSize="15" Text="{s:T tun.prompt.switch}" />
+                    </Button>
+                    <Button Height="46" Margin="0,10,0,0" HorizontalAlignment="Stretch" Click="TunPromptKeep_Click" Content="{s:T tun.prompt.keep}" Style="{StaticResource SecondaryButton}" />
+                </StackPanel>
+            </Border>
         </Grid>
 
         <!-- ── Update prompt (on start, over every screen) ───────────────────── -->

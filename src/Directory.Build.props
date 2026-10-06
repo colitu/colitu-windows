@@ -1,7 +1,7 @@
 <Project>
 
     <PropertyGroup>
-        <Version>2.5.5</Version>
+        <Version>2.6.0</Version>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -11,13 +11,13 @@
         <NoWarn>CA1031;CS1591;NU1507;CA1416;IDE0058;IDE0053;IDE0200</NoWarn>
         <Nullable>annotations</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <Authors>Doğuhan Akgüneş</Authors>
-        <Company>Doğuhan Akgüneş</Company>
+        <Authors>COLITU LIMITED</Authors>
+        <Company>COLITU LIMITED</Company>
         <Product>Colitu VPN</Product>
         <AssemblyTitle>Colitu VPN</AssemblyTitle>
         <Description>Colitu VPN Windows App</Description>
         <PackageLicenseExpression>GPL-3.0</PackageLicenseExpression>
-        <Copyright>Copyright © 2017-$([System.DateTime]::UtcNow.Year) $(Authors)</Copyright>
+        <Copyright>Copyright © 2017-$([System.DateTime]::UtcNow.Year) 2dust and the v2rayN contributors; Copyright © $([System.DateTime]::UtcNow.Year) COLITU LIMITED</Copyright>
         <InvariantGlobalization>false</InvariantGlobalization>
     </PropertyGroup>
 

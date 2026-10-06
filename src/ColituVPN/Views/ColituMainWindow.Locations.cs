@@ -98,13 +98,35 @@ public partial class ColituMainWindow
             rows.Add(row);
         }
 
+        // Double-VPN routes follow the locations in a section of their own. They have no use-case
+        // categories, so a category filter hides them. Ping is measured to the entry node only.
+        if (!filtered)
+        {
+            var routes = new List<ColituServerRow>();
+            foreach (var route in _vpn.MultihopRoutes.OrderBy(s => s.Name ?? "", StringComparer.Create(Loc.I.Culture, true)))
+            {
+                var row = ColituServerRow.From(route, _pings.TryGetValue(route.Id ?? "", out var ping) ? ping : null);
+                if (query.Length > 0 && !row.Matches(query))
+                {
+                    continue;
+                }
+                row.MarkState(route.Id == connectedId, route.Id == _vpn.SavedServerId && !_vpn.IsAutoSelection);
+                routes.Add(row);
+            }
+            if (routes.Count > 0)
+            {
+                rows.Add(ColituServerRow.Header(Loc.I["multihop.section"], Loc.I["multihop.sectionHint"]));
+                rows.AddRange(routes);
+            }
+        }
+
         auto.MarkState(_vpn.IsAutoSelection && _vpn.Status == ColituVpnStatus.Connected, _vpn.IsAutoSelection);
 
         _renderingServers = true;
         try
         {
             ServerList.ItemsSource = rows;
-            ServerList.SelectedItem = rows.FirstOrDefault(row => row.IsAuto ? _vpn.IsAutoSelection : !_vpn.IsAutoSelection && row.Server?.Id == _vpn.SavedServerId);
+            ServerList.SelectedItem = rows.FirstOrDefault(row => row.IsAuto ? _vpn.IsAutoSelection : !row.IsHeader && !_vpn.IsAutoSelection && row.Server?.Id == _vpn.SavedServerId);
         }
         finally
         {
@@ -116,7 +138,7 @@ public partial class ColituMainWindow
         ServerListEmpty.Text = _servers.Count == 0 && query.Length == 0
             ? (_planRequired ? Loc.I["plan.noneHint"] : Loc.I["server.none"])
             : filtered && query.Length == 0 ? Loc.I["cat.empty"] : Loc.I["locations.empty"];
-        ServerListEmpty.Visibility = rows.Count(row => !row.IsAuto) == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ServerListEmpty.Visibility = rows.Count(row => !row.IsAuto && !row.IsHeader) == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ServerSearch_TextChanged(object sender, TextChangedEventArgs e) => RenderServers();
@@ -133,14 +155,14 @@ public partial class ColituMainWindow
     /// </summary>
     private async Task MeasurePingsAsync(bool force = false)
     {
-        if (_measuringPings || _servers.Count == 0 || (!force && DateTimeOffset.UtcNow - _pingsMeasuredAt < TimeSpan.FromSeconds(30)))
+        if (_measuringPings || _servers.Count + _vpn.MultihopRoutes.Count == 0 || (!force && DateTimeOffset.UtcNow - _pingsMeasuredAt < TimeSpan.FromSeconds(30)))
         {
             return;
         }
         _measuringPings = true;
         try
         {
-            var measured = await ColituLatency.MeasureAllAsync(_servers.ToList());
+            var measured = await ColituLatency.MeasureAllAsync(_servers.Concat(_vpn.MultihopRoutes).ToList());
             _pingsMeasuredAt = DateTimeOffset.UtcNow;
             foreach (var (id, ms) in measured)
             {
@@ -163,7 +185,7 @@ public partial class ColituMainWindow
 
     private async void ServerList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_renderingServers || ServerList.SelectedItem is not ColituServerRow row)
+        if (_renderingServers || ServerList.SelectedItem is not ColituServerRow { IsHeader: false } row)
         {
             return;
         }
@@ -225,6 +247,21 @@ public sealed class ColituServerRow
     public string Subtitle { get; set; } = "";
     public Uri? FlagUri { get; init; }
     public Visibility FlagVisibility => FlagUri == null ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>A section title between locations (not selectable).</summary>
+    public bool IsHeader { get; init; }
+    public string HeaderHint { get; init; } = "";
+    public Visibility RowVisibility => IsHeader ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility HeaderVisibility => IsHeader ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility HeaderHintVisibility => HeaderHint.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>A double-VPN route: two flags (entry, exit) instead of one.</summary>
+    public bool IsMultihop => Server?.IsMultihop == true;
+    public Uri? EntryFlagUri { get; init; }
+    public Uri? ExitFlagUri { get; init; }
+    public Visibility PairFlagVisibility => IsMultihop ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SingleFlagVisibility => IsMultihop ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>"Estimated · +1 hop": the ping of a route is measured to its entry node only.</summary>
+    public string PingNote => IsMultihop ? Loc.I["multihop.ping"] : "";
+    public Visibility PingNoteVisibility => IsMultihop ? Visibility.Visible : Visibility.Collapsed;
     public Visibility AutoVisibility => IsAuto ? Visibility.Visible : Visibility.Collapsed;
     /// <summary>The node runs one of Colitu's ad-blocking DNS servers.</summary>
     public bool AdBlock { get; init; }
@@ -235,7 +272,7 @@ public sealed class ColituServerRow
 
     /// <summary>Ping from this PC in ms, measured outside the tunnel; null until measured.</summary>
     public int? Ping { get; init; }
-    public Visibility PingVisibility => IsAuto ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility PingVisibility => IsAuto || IsHeader ? Visibility.Collapsed : Visibility.Visible;
     public string PingText => Ping is > 0 ? $"{Ping} ms" : "— ms";
     public Brush PingBrush => Ping switch
     {
@@ -250,8 +287,8 @@ public sealed class ColituServerRow
     public Brush PingBar1 => PingLevel >= 1 ? PingBrush : Unlit;
     public Brush PingBar2 => PingLevel >= 2 ? PingBrush : Unlit;
     public Brush PingBar3 => PingLevel >= 3 ? PingBrush : Unlit;
-    public string? PingToolTip => LoadText;
-    public bool IsSelectable => IsAuto || Server?.Available == true;
+    public string? PingToolTip => IsMultihop ? Loc.I["multihop.ping"] : LoadText;
+    public bool IsSelectable => IsAuto || (!IsHeader && Server?.Available == true);
     public string StateText { get; private set; } = "";
     public Visibility StateVisibility => StateText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Brush? StateBackground { get; private set; }
@@ -266,7 +303,7 @@ public sealed class ColituServerRow
 
     public bool Matches(string query)
     {
-        return new[] { Title, Subtitle, Server?.Country, Server?.CountryCode, Server?.City }
+        return new[] { Title, Subtitle, Server?.Country, Server?.CountryCode, Server?.City, Server?.Entry?.City, Server?.Entry?.Country, Server?.Exit?.City, Server?.Exit?.Country }
             .Any(value => value?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
     }
 
@@ -277,8 +314,19 @@ public sealed class ColituServerRow
         Subtitle = Loc.I["server.autoHint"]
     };
 
+    public static ColituServerRow Header(string title, string hint = "") => new()
+    {
+        IsHeader = true,
+        Title = title,
+        HeaderHint = hint
+    };
+
     public static ColituServerRow From(ColituVpnServer server, int? ping = null)
     {
+        if (server.IsMultihop)
+        {
+            return FromRoute(server, ping);
+        }
         var country = CountryName(server.CountryCode) ?? server.Country;
         var name = FirstNonEmpty(server.DisplayName, server.Name, country, "Colitu");
         var details = new[] { country, server.City }
@@ -294,6 +342,32 @@ public sealed class ColituServerRow
             Ping = ping,
             AdBlock = ColituVpnService.HostsAdBlockDns(server.Host),
             LoadLevel = server.Load switch
+            {
+                null => 0,
+                <= 40 => 1,
+                <= 70 => 2,
+                _ => 3
+            }
+        };
+    }
+
+    /// <summary>"🇫🇮 → 🇩🇪 Helsinki → Frankfurt": both flags, the route's name and the countries.</summary>
+    private static ColituServerRow FromRoute(ColituVpnServer route, int? ping)
+    {
+        var entry = CountryName(route.Entry?.Country) ?? route.Entry?.Label ?? "";
+        var exit = CountryName(route.Exit?.Country) ?? route.Exit?.Label ?? "";
+        var name = FirstNonEmpty(route.DisplayName, route.Name,
+            string.Join(" → ", new[] { route.Entry?.Label, route.Exit?.Label }.Where(value => !string.IsNullOrWhiteSpace(value))), "Colitu");
+        return new ColituServerRow
+        {
+            Server = route,
+            Title = name,
+            Subtitle = Loc.I.Format("multihop.sub", ("entry", entry), ("exit", exit)),
+            FlagUri = route.HasLocalFlag ? route.FlagResourceUri : null,
+            EntryFlagUri = ColituVpnServer.FlagUriFor(route.Entry?.Country),
+            ExitFlagUri = ColituVpnServer.FlagUriFor(route.Exit?.Country),
+            Ping = ping,
+            LoadLevel = route.Load switch
             {
                 null => 0,
                 <= 40 => 1,

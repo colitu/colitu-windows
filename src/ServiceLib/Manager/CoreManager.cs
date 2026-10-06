@@ -15,6 +15,15 @@ public class CoreManager
     private Func<bool, string, Task>? _updateFunc;
     private const string _tag = "CoreHandler";
 
+    /// <summary>
+    /// A running core process (the main or the pre-socks one) ended without <see cref="CoreStop"/>:
+    /// it crashed or was killed. Raised on a thread-pool thread, right when Windows reports it.
+    /// </summary>
+    public event Action? CoreExited;
+
+    private ProcessService? _stoppingProcess;
+    private ProcessService? _stoppingPreProcess;
+
     public bool IsCoreRunning => _processService is { HasExited: false };
     public bool IsPreCoreRunning => _processPreService is { HasExited: false };
     public string? CoreProcessFileName => _processService?.FileName;
@@ -155,6 +164,8 @@ public class CoreManager
                 _linuxSudo = false;
             }
 
+            _stoppingProcess = _processService;
+            _stoppingPreProcess = _processPreService;
             if (_processService != null)
             {
                 await _processService.StopAsync();
@@ -192,6 +203,7 @@ public class CoreManager
             return;
         }
         _processService = proc;
+        proc.Exited += OnCoreProcessExited;
     }
 
     private async Task CoreStartPreService(CoreConfigContext? preContext)
@@ -210,7 +222,21 @@ public class CoreManager
                     return;
                 }
                 _processPreService = proc;
+                proc.Exited += OnCoreProcessExited;
             }
+        }
+    }
+
+    private void OnCoreProcessExited(object? sender, EventArgs e)
+    {
+        // Our own stop (CoreStop) is not a crash; neither is a process that was already replaced.
+        if (sender == null || ReferenceEquals(sender, _stoppingProcess) || ReferenceEquals(sender, _stoppingPreProcess))
+        {
+            return;
+        }
+        if (ReferenceEquals(sender, _processService) || ReferenceEquals(sender, _processPreService))
+        {
+            CoreExited?.Invoke();
         }
     }
 
