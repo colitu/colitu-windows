@@ -404,6 +404,7 @@ public sealed class ColituServerRow
     private static readonly Dictionary<string, string[]> Countries = new()
     {
         ["AE"] = ["ОАЭ", "BAE", "United Arab Emirates"],
+        ["AL"] = ["Албания", "Arnavutluk", "Albania"],
         ["AM"] = ["Армения", "Ermenistan", "Armenia"],
         ["AT"] = ["Австрия", "Avusturya", "Austria"],
         ["AU"] = ["Австралия", "Avustralya", "Australia"],

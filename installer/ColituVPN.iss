@@ -130,11 +130,14 @@ var
   ResultCode: Integer;
   BinPath: String;
 begin
-  BinPath := '"' + ExpandConstant('{app}\{#KsServiceExe}') + '"';
-  if not Exec(ExpandConstant('{sys}\sc.exe'), 'create {#KsServiceName} binPath= "' + BinPath + '" start= auto obj= LocalSystem DisplayName= "Colitu VPN kill switch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
+  // sc.exe must see one argument "C:\...\x.exe" with the quotes kept in the
+  // stored path: binPath= "\"path\"". The old binPath= ""path"" split the path
+  // at its first space, so the service was never created.
+  BinPath := '"\"' + ExpandConstant('{app}\{#KsServiceExe}') + '\""';
+  if not Exec(ExpandConstant('{sys}\sc.exe'), 'create {#KsServiceName} binPath= ' + BinPath + ' start= auto obj= LocalSystem DisplayName= "Colitu VPN kill switch"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) or (ResultCode <> 0) then
   begin
     // 1073 = the service exists (upgrade): update its path and start type instead.
-    Exec(ExpandConstant('{sys}\sc.exe'), 'config {#KsServiceName} binPath= "' + BinPath + '" start= auto obj= LocalSystem', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{sys}\sc.exe'), 'config {#KsServiceName} binPath= ' + BinPath + ' start= auto obj= LocalSystem', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
   Exec(ExpandConstant('{sys}\sc.exe'), 'description {#KsServiceName} "Keeps traffic from leaving outside Colitu VPN while the kill switch is on, also if the app or the VPN core stops unexpectedly."', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\sc.exe'), 'failure {#KsServiceName} reset= 86400 actions= restart/2000/restart/5000/restart/30000', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

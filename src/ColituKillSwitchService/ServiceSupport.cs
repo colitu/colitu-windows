@@ -54,27 +54,73 @@ internal sealed class KsFileLog(string path) : IKsLog
 
 internal static class KsPaths
 {
-    /// <summary>%ProgramData%\Colitu VPN\KillSwitch, created with an ACL for SYSTEM and administrators only.</summary>
+    private const int Attempts = 3;
+
+    /// <summary>%ProgramData%\Colitu VPN\KillSwitch, owned by SYSTEM with an ACL for SYSTEM and administrators only.</summary>
     public static string DataDirectory()
     {
-        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Colitu VPN", "KillSwitch");
+        var parent = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Colitu VPN");
+        var directory = Path.Combine(parent, "KillSwitch");
+        EnsureTrusted(parent);
+        EnsureTrusted(directory);
+        return directory;
+    }
+
+    // Standard users may create folders under %ProgramData%. A folder someone
+    // else created keeps them as owner (WRITE_DAC) and may be a junction or hold
+    // planted hard links, so SYSTEM's log/state writes could land elsewhere.
+    // Such a folder is never reused: it is deleted and created again.
+    private static void EnsureTrusted(string path)
+    {
+        for (var attempt = 0; attempt < Attempts; attempt++)
+        {
+            var info = new DirectoryInfo(path);
+            if (info.Exists && !IsTrusted(info))
+            {
+                // On a reparse point Delete() removes only the link, never the target.
+                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) info.Delete();
+                else info.Delete(recursive: true);
+                info.Refresh();
+            }
+            var created = !info.Exists;
+            if (created)
+            {
+                info.Create(Security());
+                info.Refresh();
+            }
+            info.SetAccessControl(Security());
+            info.Refresh();
+            // Re-check after setting owner and ACL: a folder that appeared (or
+            // filled) between our delete and create is someone else's.
+            if (IsTrusted(info) && (!created || !info.EnumerateFileSystemInfos().Any()))
+            {
+                return;
+            }
+        }
+        throw new UnauthorizedAccessException($"Could not take ownership of {path}.");
+    }
+
+    private static bool IsTrusted(DirectoryInfo info)
+    {
+        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        {
+            return false;
+        }
+        var owner = info.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        return owner is not null && (owner.IsWellKnown(WellKnownSidType.LocalSystemSid) || owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid));
+    }
+
+    private static DirectorySecurity Security()
+    {
         var security = new DirectorySecurity();
+        security.SetOwner(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         foreach (var sid in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid })
         {
             security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null), FileSystemRights.FullControl,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         }
-        var info = new DirectoryInfo(directory);
-        if (!info.Exists)
-        {
-            info.Create(security);
-        }
-        else
-        {
-            info.SetAccessControl(security);
-        }
-        return directory;
+        return security;
     }
 }
 
