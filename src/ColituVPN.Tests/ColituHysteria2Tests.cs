@@ -37,4 +37,46 @@ public class ColituHysteria2Tests
         item.Password.Should().Be("secret");
         item.Sni.Should().Be("vpn.example.com");
     }
+
+    [Fact]
+    public void Hysteria2Link_WithMport_HopsPorts_WithoutMport_DoesNot()
+    {
+        var hopping = ServiceLib.Handler.Fmt.Hysteria2Fmt.Resolve("hysteria2://secret@203.0.113.7:8443?sni=vpn.example.com&insecure=0&mport=20000-40000#Colitu", out _)!;
+        var plain = ServiceLib.Handler.Fmt.Hysteria2Fmt.Resolve("hysteria2://secret@203.0.113.7:8443?sni=vpn.example.com&insecure=0#Colitu", out _)!;
+
+        ColituVpnService.UsesPortHopping(hopping).Should().BeTrue();
+        ColituVpnService.UsesPortHopping(plain).Should().BeFalse();
+    }
+
+    [Fact]
+    public void KillSwitch_WithPortHopping_LetsTheCoresReachTheWholeRange()
+    {
+        // The service pins single ports; hops go to any port of 20000-40000.
+        var servers = new[] { ("203.0.113.7", 8443, "hysteria2"), ("203.0.113.7", 443, "vless-reality") };
+
+        ColituVpnService.BuildKillSwitchArm(new ColituVpnPreferences(), true, servers, false, [], false, portHopping: true)
+            .CoreAccess.Should().Be(Colitu.KillSwitch.KsProtocol.CoreAccessFull);
+        ColituVpnService.BuildKillSwitchArm(new ColituVpnPreferences(), true, servers, false, [], false)
+            .CoreAccess.Should().Be(Colitu.KillSwitch.KsProtocol.CoreAccessEndpoints);
+    }
+
+    [Fact]
+    public void MidSessionStall_SwitchesTransportAtMostOncePerMinute()
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        ColituVpnService.ShouldSwitchTransport(null, now).Should().BeTrue();
+        ColituVpnService.ShouldSwitchTransport(now.AddSeconds(-30), now).Should().BeFalse();
+        ColituVpnService.ShouldSwitchTransport(now.AddSeconds(-60), now).Should().BeTrue();
+    }
+
+    [Fact]
+    public void DemotedHysteria2_GoesBehindTheOtherTransports()
+    {
+        var order = new[] { ("hysteria2", -1, true), ("vless-reality", 80, false), ("trojan", 40, false) }
+            .OrderBy(t => ColituVpnService.TransportRank(t.Item1, t.Item2, t.Item3))
+            .Select(t => t.Item1);
+
+        order.Should().Equal("vless-reality", "trojan", "hysteria2");
+    }
 }
