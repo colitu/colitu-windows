@@ -20,6 +20,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="TestData\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ColituVPN\ColituVPN.csproj" />
     <!-- The kill-switch service (pipe ACL tests); its shared code comes through ColituKillSwitch.Core. -->
     <ProjectReference Include="..\ColituKillSwitchService\ColituKillSwitchService.csproj" />

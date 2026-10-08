@@ -1521,7 +1521,8 @@ public sealed class ColituVpnService
     /// <summary>Hosts the app itself calls while the kill switch is armed: the panel API and the update manifest.</summary>
     private static IEnumerable<string?> PinnedAppHosts()
     {
-        foreach (var url in new[] { ColituAuthService.Instance.ApiBaseUrl, ColituAuthService.WebBaseUrl })
+        // Every API base and list URL of the signed endpoint list: failover must never hit the kill switch.
+        foreach (var url in ColituAuthService.Instance.PinnedUrls())
         {
             yield return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : null;
         }

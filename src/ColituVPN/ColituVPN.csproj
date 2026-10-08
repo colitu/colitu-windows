@@ -29,6 +29,11 @@
 		<AssemblyMetadata Include="ColituAdBlockDoh" Value="$(ColituAdBlockDoh)" />
 	</ItemGroup>
 
+	<!-- Mirror origins for the API failover (comma-separated https origins), given by scripts/build-installer.ps1 (kept out of the repository). -->
+	<ItemGroup Condition="'$(ColituMirrors)' != ''">
+		<AssemblyMetadata Include="ColituMirrors" Value="$(ColituMirrors)" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<AdditionalFiles Include="app.manifest" />
 		<EmbeddedResource Include="Resources\colitu.ico">

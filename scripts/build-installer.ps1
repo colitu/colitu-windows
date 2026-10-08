@@ -8,7 +8,10 @@ param(
     [string]$SigningKeyPath = $(if ($env:COLITU_UPDATE_SIGNING_KEY) { $env:COLITU_UPDATE_SIGNING_KEY } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-windows--update-signing-private.pem" }),
     # Comma-separated ad-blocking DoH URLs. They point at Colitu's own nodes, so like the signing
     # key they stay out of the repository; the build embeds them (ColituAdBlockDoh assembly metadata).
-    [string]$AdBlockDohPath = $(if ($env:COLITU_ADBLOCK_DOH_FILE) { $env:COLITU_ADBLOCK_DOH_FILE } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-adblock-doh.txt" })
+    [string]$AdBlockDohPath = $(if ($env:COLITU_ADBLOCK_DOH_FILE) { $env:COLITU_ADBLOCK_DOH_FILE } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-adblock-doh.txt" }),
+    # Comma-separated https origins of the API mirrors (failover). Like the signing key they stay out
+    # of the repository; the build embeds them (ColituMirrors assembly metadata).
+    [string]$MirrorsPath = $(if ($env:COLITU_MIRRORS_FILE) { $env:COLITU_MIRRORS_FILE } else { Join-Path $PSScriptRoot "..\..\_gizli_anahtarlar\colitu-mirrors.txt" })
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,6 +79,9 @@ Assert-FileExists $SigningKeyPath "Update manifest signing key"
 Assert-FileExists $AdBlockDohPath "Ad-blocking DoH server list"
 $adBlockDoh = (Get-Content -LiteralPath $AdBlockDohPath -Raw).Trim()
 if (-not $adBlockDoh.StartsWith("https://")) { throw "The ad-blocking DoH server list is empty or invalid: $AdBlockDohPath" }
+Assert-FileExists $MirrorsPath "API mirror list"
+$mirrors = (Get-Content -LiteralPath $MirrorsPath -Raw).Trim()
+if (-not $mirrors.StartsWith("https://")) { throw "The API mirror list is empty or invalid: $MirrorsPath" }
 
 # Start from an empty folder: running the published app for a test leaves its database,
 # logs and session there, and the installer would ship them to every user.
@@ -89,6 +95,7 @@ if (-not $SkipPublish) {
     Write-Host "Publishing app..." -ForegroundColor Cyan
     # Passed as an environment variable: on the command line MSBuild would split it at the commas.
     $env:ColituAdBlockDoh = $adBlockDoh
+    $env:ColituMirrors = $mirrors
     & $dotnet publish $projectPath `
         --configuration $Configuration `
         --runtime $Runtime `
