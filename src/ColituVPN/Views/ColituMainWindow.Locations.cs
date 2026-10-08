@@ -10,6 +10,11 @@ public partial class ColituMainWindow
     private bool _buildingCategories;
     private string _category = "all";
 
+    /// <summary>Country groups the user has opened (kept while the window is open).</summary>
+    private readonly HashSet<string> _expandedGroups = new(StringComparer.Ordinal);
+    /// <summary>Server whose country was last opened automatically, so a manual collapse sticks.</summary>
+    private string? _autoExpandedFor;
+
     /// <summary>Use-case filters over the location list, in the panel's order.</summary>
     private static readonly string[] Categories = ["all", "streaming", "gaming", "privacy", "speed", "torrent", "ai"];
 
@@ -81,21 +86,50 @@ public partial class ColituMainWindow
             rows.Add(auto);
         }
 
-        foreach (var server in _servers
-                     .OrderBy(s => ColituServerRow.CountryName(s.CountryCode) ?? s.Country ?? "", StringComparer.Create(Loc.I.Culture, true))
-                     .ThenBy(s => s.City ?? s.Name, StringComparer.Create(Loc.I.Culture, true)))
+        ColituServerRow BuildRow(ColituVpnServer server, bool city = false)
         {
-            if (filtered && !server.Categories.Contains(_category))
-            {
-                continue;
-            }
-            var row = ColituServerRow.From(server, _pings.TryGetValue(server.Id ?? "", out var ping) ? ping : null);
-            if (query.Length > 0 && !row.Matches(query))
-            {
-                continue;
-            }
+            var row = ColituServerRow.From(server, _pings.TryGetValue(server.Id ?? "", out var ping) ? ping : null, city);
             row.MarkState(server.Id == connectedId, server.Id == _vpn.SavedServerId && !_vpn.IsAutoSelection);
-            rows.Add(row);
+            return row;
+        }
+
+        // The country of the picked (or connected) server starts open; after that the user decides.
+        var focusId = connectedId ?? (_vpn.IsAutoSelection ? null : _vpn.SavedServerId);
+        if (focusId != _autoExpandedFor)
+        {
+            _autoExpandedFor = focusId;
+            var focus = _servers.FirstOrDefault(s => s.Id == focusId);
+            if (focus != null)
+            {
+                _expandedGroups.Add(ColituServerGroups.KeyOf(focus));
+            }
+        }
+
+        // With a search text the matches are shown flat, so none is hidden inside a closed country.
+        var flat = query.Length > 0;
+        var candidates = _servers.Where(server => (!filtered || server.Categories.Contains(_category))
+            && (!flat || ColituServerRow.From(server).Matches(query)));
+        foreach (var group in ColituServerGroups.Build(candidates, ColituServerRow.CountryName, StringComparer.Create(Loc.I.Culture, true), flat))
+        {
+            if (group.IsSingle)
+            {
+                rows.Add(BuildRow(group.Servers[0]));
+                continue;
+            }
+
+            var expanded = _expandedGroups.Contains(group.Key);
+            var best = ColituServerGroups.BestPing(group.Servers, server => _pings.TryGetValue(server.Id ?? "", out var ping) ? ping : null);
+            var header = ColituServerRow.Group(group, best, expanded);
+            if (!expanded)
+            {
+                // A closed country still tells that its picked / connected city is in it.
+                header.MarkGroupState(group.Servers.Any(s => s.Id == connectedId), group.Servers.Any(s => s.Id == _vpn.SavedServerId && !_vpn.IsAutoSelection));
+            }
+            rows.Add(header);
+            if (expanded)
+            {
+                rows.AddRange(group.Servers.Select(server => BuildRow(server, true)));
+            }
         }
 
         // Double-VPN routes follow the locations in a section of their own. They have no use-case
@@ -126,7 +160,7 @@ public partial class ColituMainWindow
         try
         {
             ServerList.ItemsSource = rows;
-            ServerList.SelectedItem = rows.FirstOrDefault(row => row.IsAuto ? _vpn.IsAutoSelection : !row.IsHeader && !_vpn.IsAutoSelection && row.Server?.Id == _vpn.SavedServerId);
+            ServerList.SelectedItem = rows.FirstOrDefault(row => row.IsAuto ? _vpn.IsAutoSelection : !row.IsHeader && !row.IsGroup && !_vpn.IsAutoSelection && row.Server?.Id == _vpn.SavedServerId);
         }
         finally
         {
@@ -142,6 +176,38 @@ public partial class ColituMainWindow
     }
 
     private void ServerSearch_TextChanged(object sender, TextChangedEventArgs e) => RenderServers();
+
+    private void ToggleGroup(string key)
+    {
+        if (!_expandedGroups.Remove(key))
+        {
+            _expandedGroups.Add(key);
+        }
+
+        // Rebuilding the list resets the scroll position; put it back (item-based offset).
+        var scroll = FindScrollViewer(ServerList);
+        var offset = scroll?.VerticalOffset ?? 0;
+        RenderServers();
+        ServerList.UpdateLayout();
+        scroll?.ScrollToVerticalOffset(offset);
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer viewer)
+            {
+                return viewer;
+            }
+            if (FindScrollViewer(child) is { } nested)
+            {
+                return nested;
+            }
+        }
+        return null;
+    }
 
     // ── Pings ───────────────────────────────────────────────────────────────
     /// <summary>Last measured ping per server id. The panel sends where to measure, not a number.</summary>
@@ -185,7 +251,19 @@ public partial class ColituMainWindow
 
     private async void ServerList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_renderingServers || ServerList.SelectedItem is not ColituServerRow { IsHeader: false } row)
+        if (_renderingServers)
+        {
+            return;
+        }
+
+        // A country header opens / closes its cities instead of picking a server.
+        if (ServerList.SelectedItem is ColituServerRow { IsGroup: true } group)
+        {
+            ToggleGroup(group.GroupKey);
+            return;
+        }
+
+        if (ServerList.SelectedItem is not ColituServerRow { IsHeader: false } row)
         {
             return;
         }
@@ -247,6 +325,14 @@ public sealed class ColituServerRow
     public string Subtitle { get; set; } = "";
     public Uri? FlagUri { get; init; }
     public Visibility FlagVisibility => FlagUri == null ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>A country header (two or more locations): opens / closes its city rows.</summary>
+    public bool IsGroup { get; init; }
+    public string GroupKey { get; init; } = "";
+    public bool Expanded { get; init; }
+    /// <summary>A city row inside an open country: indented, no flag.</summary>
+    public bool IsCity { get; init; }
+    public double ChevronAngle => Expanded ? 90 : 0;
+    public Visibility ChevronVisibility => IsGroup ? Visibility.Visible : Visibility.Collapsed;
     /// <summary>A section title between locations (not selectable).</summary>
     public bool IsHeader { get; init; }
     public string HeaderHint { get; init; } = "";
@@ -258,7 +344,7 @@ public sealed class ColituServerRow
     public Uri? EntryFlagUri { get; init; }
     public Uri? ExitFlagUri { get; init; }
     public Visibility PairFlagVisibility => IsMultihop ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility SingleFlagVisibility => IsMultihop ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility SingleFlagVisibility => IsMultihop || IsCity ? Visibility.Collapsed : Visibility.Visible;
     /// <summary>"Estimated · +1 hop": the ping of a route is measured to its entry node only.</summary>
     public string PingNote => IsMultihop ? Loc.I["multihop.ping"] : "";
     public Visibility PingNoteVisibility => IsMultihop ? Visibility.Visible : Visibility.Collapsed;
@@ -266,7 +352,11 @@ public sealed class ColituServerRow
     /// <summary>The node runs one of Colitu's ad-blocking DNS servers.</summary>
     public bool AdBlock { get; init; }
     public Visibility AdBlockVisibility => AdBlock ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AdFreeYoutubeVisibility => AdFreeYoutube ? Visibility.Visible : Visibility.Collapsed;
     public string AdBlockText => Loc.I["cat.adblock"];
+    /// <summary>The panel marks this node as giving ad-free YouTube.</summary>
+    public bool AdFreeYoutube { get; init; }
+    public string AdFreeYoutubeText => Loc.I["service.youtube_adfree"];
     public int LoadLevel { get; init; }
     public string? LoadText => LoadLevel > 0 ? Loc.I[LoadLevel switch { 1 => "server.load.low", 2 => "server.load.medium", _ => "server.load.high" }] : null;
 
@@ -288,7 +378,7 @@ public sealed class ColituServerRow
     public Brush PingBar2 => PingLevel >= 2 ? PingBrush : Unlit;
     public Brush PingBar3 => PingLevel >= 3 ? PingBrush : Unlit;
     public string? PingToolTip => IsMultihop ? Loc.I["multihop.ping"] : LoadText;
-    public bool IsSelectable => IsAuto || (!IsHeader && Server?.Available == true);
+    public bool IsSelectable => IsAuto || IsGroup || (!IsHeader && Server?.Available == true);
     public string StateText { get; private set; } = "";
     public Visibility StateVisibility => StateText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Brush? StateBackground { get; private set; }
@@ -299,6 +389,14 @@ public sealed class ColituServerRow
         StateText = connected ? Loc.I["server.connected"] : !IsSelectable ? Loc.I["server.offline"] : selected ? Loc.I["server.selected"] : "";
         StateBackground = connected ? ConnectedBrush : !IsSelectable ? OfflineBrush : SelectedBrush;
         StateForeground = connected ? ConnectedText : !IsSelectable ? OfflineText : SelectedText;
+    }
+
+    /// <summary>State badge of a closed country that holds the connected / picked location.</summary>
+    public void MarkGroupState(bool connected, bool selected)
+    {
+        StateText = connected ? Loc.I["server.connected"] : selected ? Loc.I["server.selected"] : "";
+        StateBackground = connected ? ConnectedBrush : SelectedBrush;
+        StateForeground = connected ? ConnectedText : SelectedText;
     }
 
     public bool Matches(string query)
@@ -321,7 +419,20 @@ public sealed class ColituServerRow
         HeaderHint = hint
     };
 
-    public static ColituServerRow From(ColituVpnServer server, int? ping = null)
+    /// <summary>Header of a country with two or more locations: flag, name, count, best ping, chevron.</summary>
+    public static ColituServerRow Group(ColituServerGroup group, int? bestPing, bool expanded) => new()
+    {
+        IsGroup = true,
+        GroupKey = group.Key,
+        Expanded = expanded,
+        Title = group.Name,
+        Subtitle = Loc.I.Count("location", group.Servers.Count),
+        FlagUri = ColituVpnServer.FlagUriFor(group.CountryCode),
+        Ping = bestPing
+    };
+
+    /// <param name="city">A row inside an open country: the city is the title.</param>
+    public static ColituServerRow From(ColituVpnServer server, int? ping = null, bool city = false)
     {
         if (server.IsMultihop)
         {
@@ -329,18 +440,31 @@ public sealed class ColituServerRow
         }
         var country = CountryName(server.CountryCode) ?? server.Country;
         var name = FirstNonEmpty(server.DisplayName, server.Name, country, "Colitu");
-        var details = new[] { country, server.City }
-            .Where(value => !string.IsNullOrWhiteSpace(value) && !string.Equals(value, name, StringComparison.CurrentCultureIgnoreCase))
+        var categories = server.Categories.Count == 0 ? [] : new[] { string.Join(", ", server.Categories.Select(category => Loc.Has("cat." + category) ? Loc.I.Get("cat." + category) : category)) };
+        var title = name;
+        var lead = new[] { country, server.City };
+        if (city)
+        {
+            // Under its country header: the city names the row; the full name only if it adds something (e.g. "Letonya (Köprü)").
+            title = FirstNonEmpty(server.City, name);
+            lead = [name, null];
+        }
+        var details = lead
+            .Where(value => !string.IsNullOrWhiteSpace(value)
+                && !string.Equals(value, title, StringComparison.CurrentCultureIgnoreCase)
+                && !(city && string.Equals(value, country, StringComparison.CurrentCultureIgnoreCase)))
             .Distinct(StringComparer.CurrentCultureIgnoreCase)
-            .Concat(server.Categories.Count == 0 ? [] : [string.Join(", ", server.Categories.Select(category => Loc.Has("cat." + category) ? Loc.I.Get("cat." + category) : category))]);
+            .Concat(categories);
         return new ColituServerRow
         {
             Server = server,
-            Title = name,
+            Title = title,
             Subtitle = string.Join(" · ", details),
+            IsCity = city,
             FlagUri = server.HasLocalFlag ? server.FlagResourceUri : null,
             Ping = ping,
             AdBlock = ColituVpnService.HostsAdBlockDns(server.Host),
+            AdFreeYoutube = server.HasAdFreeYoutube,
             LoadLevel = server.Load switch
             {
                 null => 0,

@@ -31,10 +31,10 @@ public sealed class ColituUpdateService
     private static readonly string LocalVersionName = ColituAuthService.ClientVersion;
     private static readonly TimeSpan AttemptCooldown = TimeSpan.FromMinutes(30);
 
-    private readonly HttpClient _httpClient = new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(30) };
+    private readonly HttpClient _httpClient = new(new SocketsHttpHandler { UseProxy = false, ConnectCallback = ColituPinnedHosts.ConnectAsync }) { Timeout = TimeSpan.FromSeconds(30) };
     // HttpClient.Timeout also cancels content streaming, so large packages need their own client
     // with a generous limit; otherwise slow connections abort the download after 30 seconds.
-    private readonly HttpClient _downloadClient = new(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromMinutes(30) };
+    private readonly HttpClient _downloadClient = new(new SocketsHttpHandler { UseProxy = false, ConnectCallback = ColituPinnedHosts.ConnectAsync }) { Timeout = TimeSpan.FromMinutes(30) };
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public event Action<ColituUpdateInfo>? UpdateAvailable;

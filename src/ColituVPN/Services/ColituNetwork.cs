@@ -54,7 +54,9 @@ public static class ColituNetwork
     {
         UseProxy = false,
         ConnectTimeout = TimeSpan.FromSeconds(4),
-        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
+        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+        // The resolvers' own names can't be looked up while the kill switch blocks DNS.
+        ConnectCallback = ColituPinnedHosts.ConnectAsync
     })
     { Timeout = TimeSpan.FromSeconds(5) };
 

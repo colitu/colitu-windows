@@ -282,6 +282,10 @@ public sealed class ColituVpnService
             }
             if (Preferences.KillSwitchEnabled)
             {
+                // The kill switch blocks DNS outside the tunnel, and Windows resolves names in the
+                // system DNS client, not in this app: look the panel up now (the last good
+                // addresses stay when it is already armed) and dial those addresses later.
+                await ColituPinnedHosts.RefreshAsync(PinnedAppHosts(), token);
                 // Armed before the first packet of the session (TUN and proxy mode): this app may
                 // reach the panel and resolve the server, nothing else gets out until the tunnel is up.
                 var wasEngaged = KillSwitchEngaged;
@@ -1396,6 +1400,15 @@ public sealed class ColituVpnService
 
     /// <summary>The cores' bootstrap resolvers (EnsureCoreReadyAsync): reachable outside the tunnel to find the DoH servers.</summary>
     private static readonly string[] BootstrapResolvers = ["1.1.1.1", "8.8.8.8"];
+
+    /// <summary>Hosts the app itself calls while the kill switch is armed: the panel API and the update manifest.</summary>
+    private static IEnumerable<string?> PinnedAppHosts()
+    {
+        foreach (var url in new[] { ColituAuthService.Instance.ApiBaseUrl, ColituAuthService.WebBaseUrl })
+        {
+            yield return Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : null;
+        }
+    }
 
     /// <summary>True while the kill switch is blocking traffic outside the VPN.</summary>
     public bool KillSwitchEngaged => _serviceArmed || _dynamicKillSwitch.IsEngaged;
@@ -3017,6 +3030,9 @@ public sealed class ColituVpnServer
     public string? TestUrl { get; set; }
     /// <summary>Use-case categories from the panel (streaming, gaming, privacy, speed, torrent, ai).</summary>
     public List<string> Categories { get; set; } = [];
+    /// <summary>Service tags from the panel (chatgpt, netflix, youtube_adfree...); only <c>youtube_adfree</c> is shown here, unknown keys are ignored.</summary>
+    public List<string> Services { get; set; } = [];
+    public bool HasAdFreeYoutube => Services.Contains("youtube_adfree");
     /// <summary>A multihop route (double VPN): <see cref="Entry"/> node, then <see cref="Exit"/> node. The list item's id is the route id.</summary>
     public bool IsMultihop { get; set; }
     public string? RouteSlug { get; set; }

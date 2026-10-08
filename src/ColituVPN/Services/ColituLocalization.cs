@@ -224,6 +224,9 @@ public sealed class Loc : INotifyPropertyChanged
         ["device.one"] = ["{n} устройство", "{n} cihaz", "{n} device"],
         ["device.few"] = ["{n} устройства", "{n} cihaz", "{n} devices"],
         ["device.many"] = ["{n} устройств", "{n} cihaz", "{n} devices"],
+        ["location.one"] = ["{n} локация", "{n} konum", "{n} location"],
+        ["location.few"] = ["{n} локации", "{n} konum", "{n} locations"],
+        ["location.many"] = ["{n} локаций", "{n} konum", "{n} locations"],
 
         // Pricing (same wording as colitu.com/pricing)
         ["pricing.kicker"] = ["ТАРИФЫ", "PAKETLER", "PLANS"],
@@ -411,6 +414,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["cat.torrent"] = ["Торренты", "Torrent", "Torrent"],
         ["cat.ai"] = ["ИИ", "Yapay zekâ", "AI"],
         ["cat.adblock"] = ["Блокировка рекламы", "Reklam engelleme", "Ad blocking"],
+        ["service.youtube_adfree"] = ["YouTube без рекламы", "Reklamsız YouTube", "Ad-free YouTube"],
         ["cat.empty"] = ["В этой категории пока нет серверов.", "Bu kategoride henüz sunucu yok.", "No servers in this category yet."],
 
         // Live support

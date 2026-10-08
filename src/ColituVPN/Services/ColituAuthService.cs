@@ -337,7 +337,9 @@ public sealed class ColituAuthService
         // (307/308 keep the body) and the device id to another address.
         AllowAutoRedirect = false,
         ConnectTimeout = TimeSpan.FromSeconds(8),
-        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30)
+        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+        // The kill switch blocks the system DNS lookup: dial the API's pinned addresses.
+        ConnectCallback = ColituPinnedHosts.ConnectAsync
     })
     {
         Timeout = timeout,

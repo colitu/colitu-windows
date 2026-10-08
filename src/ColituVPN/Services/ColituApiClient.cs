@@ -339,7 +339,7 @@ public sealed class ColituApiClient
         }
     }
 
-    private static ColituVpnServer MapServer(ColituServerDto dto)
+    internal static ColituVpnServer MapServer(ColituServerDto dto)
     {
         var code = (dto.Country ?? "").Trim().ToUpperInvariant();
         var server = new ColituVpnServer
@@ -360,6 +360,7 @@ public sealed class ColituApiClient
             Host = dto.LatencyHost,
             Port = dto.LatencyPort,
             Categories = (dto.Categories ?? []).Select(value => value.Trim().ToLowerInvariant()).Where(value => value.Length > 0).Distinct().ToList(),
+            Services = (dto.Services ?? []).Select(value => (value ?? "").Trim().ToLowerInvariant()).Where(value => value.Length > 0).Distinct().ToList(),
             Load = dto.Load?.ToLowerInvariant() switch
             {
                 "low" => 25,
@@ -836,6 +837,7 @@ internal sealed class ColituServerDto
     [JsonPropertyName("load")] public string? Load { get; set; }
     [JsonPropertyName("protocols")] public List<string>? Protocols { get; set; }
     [JsonPropertyName("categories")] public List<string>? Categories { get; set; }
+    [JsonPropertyName("services")] public List<string>? Services { get; set; }
     [JsonPropertyName("latency_host")] public string? LatencyHost { get; set; }
     [JsonPropertyName("latency_port")] public int? LatencyPort { get; set; }
     // Multihop routes only.
