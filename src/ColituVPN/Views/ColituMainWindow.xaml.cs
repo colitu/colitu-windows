@@ -285,6 +285,7 @@ public partial class ColituMainWindow
             RenderServers();
             ApplyStatus();
             _ = MeasurePingsAsync();
+            _ = RefreshNoticesAsync();
             if (_page == "account")
             {
                 await LoadDevicesAsync();
@@ -355,6 +356,7 @@ public partial class ColituMainWindow
         _offline = false;
         DeviceList.ItemsSource = null;
         DevicesTitle.Text = "";
+        ClearNotices();
     }
 
     // ── Views and navigation ───────────────────────────────────────────────
@@ -508,6 +510,11 @@ public partial class ColituMainWindow
         ApplySplitUi();
         RenderSupportList();
         _ = LoadDevicesAsync();
+        if (AppView.Visibility == Visibility.Visible)
+        {
+            // The panel writes the notices in the app's language.
+            _ = RefreshNoticesAsync();
+        }
         Dispatcher.BeginInvoke(() => MoveNavThumb(false), DispatcherPriority.Loaded);
     }
 

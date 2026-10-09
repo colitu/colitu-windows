@@ -98,7 +98,7 @@ public partial class ColituMainWindow
             : loc["home.title.off"];
         HomeSubtitle.Text = on ? loc.Format("home.sub.on", ("server", ServerLabel(_vpn.ConnectedServer) ?? loc["server.auto"]))
             : blocked ? loc[_vpn.KillSwitchHeldAfterCrash ? "home.sub.blockedCrash" : "home.sub.blocked"]
-            : busy ? loc["home.sub.connecting"]
+            : busy ? loc[_vpn.ConnectStage ?? "home.sub.connecting"]
             : _planRequired ? loc["home.sub.noplan"]
             : status == ColituVpnStatus.Error && _vpn.LastError is { Length: > 0 } error ? error
             : loc["home.sub.off"];
@@ -108,7 +108,7 @@ public partial class ColituMainWindow
             : loc["home.tap"];
         ConnectButton.ToolTip = on ? loc["home.disconnect"] : busy ? loc["home.cancel"] : loc["home.connect"];
         var protocol = on ? _vpn.ConnectedProtocol : null;
-        ProtocolChip.Visibility = protocol is { Length: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+        ProtocolChip.Visibility = protocol is { Length: > 0 } && _vpn.AdvancedMode ? Visibility.Visible : Visibility.Collapsed;
         ProtocolChipText.Text = protocol is { Length: > 0 } ? $"{loc["home.protocol"]} · {ColituTransportNames.Of(protocol, loc)}".ToUpper(loc.Culture) : "";
 
         StatusChipText.Text = on ? loc["status.protected"]
@@ -119,6 +119,7 @@ public partial class ColituMainWindow
         TrayIcon.ToolTipText = $"Colitu VPN · {StatusChipText.Text}";
         TrayConnectItem.Header = on || busy || blocked ? loc["tray.disconnect"] : loc["tray.connect"];
         UnblockButton.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
+        TryFastestButton.Visibility = status == ColituVpnStatus.Error && _vpn.OfferFastestServer && !_vpn.IsAutoSelection ? Visibility.Visible : Visibility.Collapsed;
         ApplyRuDirectIndicator();
         ApplySplitChip();
         ApplyProxyCoverageChip();
@@ -130,6 +131,7 @@ public partial class ColituMainWindow
         }
         ApplyLocationCard();
         UpdateSessionTimer();
+        ApplyHomeMode();
     }
 
     private void UpdateSessionTimer()
@@ -189,7 +191,7 @@ public partial class ColituMainWindow
         {
             ForgetRotationStatus();
         }
-        RouteChip.Visibility = text == null ? Visibility.Collapsed : Visibility.Visible;
+        RouteChip.Visibility = text == null || !_vpn.AdvancedMode ? Visibility.Collapsed : Visibility.Visible;
         RouteChipText.Text = text?.ToUpper(Loc.I.Culture) ?? "";
     }
 
@@ -288,6 +290,15 @@ public partial class ColituMainWindow
 
     private DateTime _lastToggle;
 
+    /// <summary>"Try the fastest server": automatic mode, then connect (only on this tap).</summary>
+    private async void TryFastest_Click(object sender, RoutedEventArgs e)
+    {
+        _vpn.SelectAuto();
+        ApplyLocationCard();
+        _lastToggle = DateTime.MinValue;
+        await ToggleConnectionAsync();
+    }
+
     private async Task ToggleConnectionAsync()
     {
         // A double click would start a connection and cancel it again right away.
@@ -354,9 +365,10 @@ public partial class ColituMainWindow
     // ── Location card ──────────────────────────────────────────────────────
     private void ApplyLocationCard()
     {
+        // "Best server" shows the server it connects to first (the same rank[0] the connect uses).
         var server = _vpn.Status is ColituVpnStatus.Connected && _vpn.ConnectedServer != null
             ? _vpn.ConnectedServer
-            : _vpn.IsAutoSelection ? null : _vpn.SelectedServer ?? _servers.FirstOrDefault(s => s.Id == _vpn.SavedServerId);
+            : _vpn.IsAutoSelection ? _vpn.RecommendedServer : _vpn.SelectedServer ?? _servers.FirstOrDefault(s => s.Id == _vpn.SavedServerId);
         var row = server == null ? ColituServerRow.Auto() : ColituServerRow.From(server);
         if (_vpn.IsAutoSelection && server != null)
         {
@@ -538,11 +550,13 @@ public partial class ColituMainWindow
             SettingsAdBlock.IsChecked = preferences.AdBlockEnabled;
             SettingsAdBlockRow.Visibility = ColituVpnService.AdBlockAvailable ? Visibility.Visible : Visibility.Collapsed;
             SettingsPrivacy.IsChecked = preferences.PrivacyModeEnabled;
+            SettingsWarmSpare.IsChecked = preferences.WarmSpareEnabled;
             SettingsTray.IsChecked = preferences.CloseToTray;
             SettingsStartup.IsChecked = _vpn.LaunchAtStartup;
             ApplyModeHint();
             ApplySplitUi();
             ApplyRotationUi();
+            ApplyUiMode();
         }
         finally
         {
@@ -592,6 +606,7 @@ public partial class ColituMainWindow
             : box == SettingsPrivacy ? preferences with { PrivacyModeEnabled = on, RuDirectNoticeShown = true }
             : box == SettingsTray ? preferences with { CloseToTray = on }
             : box == SettingsKillSwitchLan ? preferences with { KillSwitchAllowLan = on }
+            : box == SettingsWarmSpare ? preferences with { WarmSpareEnabled = on }
             : preferences;
         await SavePreferencesAsync(preferences);
     }
@@ -604,6 +619,7 @@ public partial class ColituMainWindow
             || preferences.DnsLeakProtectionEnabled != _vpn.Preferences.DnsLeakProtectionEnabled
             || preferences.AdBlockEnabled != _vpn.Preferences.AdBlockEnabled
             || preferences.PrivacyModeEnabled != _vpn.Preferences.PrivacyModeEnabled
+            || preferences.WarmSpareEnabled != _vpn.Preferences.WarmSpareEnabled
             || SplitSettingsChanged(preferences, _vpn.Preferences)
             || (preferences.IsTunMode && preferences.KillSwitchEnabled != _vpn.Preferences.KillSwitchEnabled);
         try
@@ -648,7 +664,8 @@ public partial class ColituMainWindow
         {
             return;
         }
-        var active = _vpn.RussianSitesDirectActive;
+        // Simple mode hides privacy mode, so neither the chip nor its one-time notice.
+        var active = _vpn.RussianSitesDirectActive && _vpn.AdvancedMode;
         RuDirectChip.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         RuDirectChipText.Text = Loc.I["privacy.chip"].ToUpper(Loc.I.Culture);
         if (active && !_vpn.Preferences.RuDirectNoticeShown && RuDirectNotice.Visibility != Visibility.Visible)

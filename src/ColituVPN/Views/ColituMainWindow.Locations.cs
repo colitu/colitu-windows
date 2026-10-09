@@ -77,10 +77,13 @@ public partial class ColituMainWindow
         }
 
         var query = ServerSearchBox.Text.Trim();
-        var filtered = _category != "all";
+        // Simple mode: a flat country list, no category filters and no multihop routes.
+        var advanced = _vpn.AdvancedMode;
+        CategoryHost.Visibility = advanced ? Visibility.Visible : Visibility.Collapsed;
+        var filtered = advanced && _category != "all";
         var connectedId = _vpn.Status == ColituVpnStatus.Connected ? _vpn.ConnectedServer?.Id : null;
         var rows = new List<ColituServerRow>();
-        var auto = ColituServerRow.Auto();
+        var auto = ColituServerRow.Auto(ServerLabel(_vpn.RecommendedServer));
         if (query.Length == 0 && !filtered)
         {
             rows.Add(auto);
@@ -134,7 +137,7 @@ public partial class ColituMainWindow
 
         // Double-VPN routes follow the locations in a section of their own. They have no use-case
         // categories, so a category filter hides them. Ping is measured to the entry node only.
-        if (!filtered)
+        if (!filtered && advanced)
         {
             var routes = new List<ColituServerRow>();
             foreach (var route in _vpn.MultihopRoutes.OrderBy(s => s.Name ?? "", StringComparer.Create(Loc.I.Culture, true)))
@@ -228,7 +231,8 @@ public partial class ColituMainWindow
         _measuringPings = true;
         try
         {
-            var measured = await ColituLatency.MeasureAllAsync(_servers.Concat(_vpn.MultihopRoutes).ToList());
+            // Through the service: it keeps the results (failed pings too) for the automatic order.
+            var measured = await _vpn.MeasurePingsAsync(_servers.Concat(_vpn.MultihopRoutes).ToList());
             _pingsMeasuredAt = DateTimeOffset.UtcNow;
             foreach (var (id, ms) in measured)
             {
@@ -238,6 +242,8 @@ public partial class ColituMainWindow
             {
                 RenderServers();
             }
+            // The recommended server may have changed with the pings.
+            ApplyLocationCard();
         }
         catch (Exception ex)
         {
@@ -405,11 +411,12 @@ public sealed class ColituServerRow
             .Any(value => value?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true);
     }
 
-    public static ColituServerRow Auto() => new()
+    /// <summary>"Best server"; with <paramref name="recommended"/> (the server it connects to first) named under it.</summary>
+    public static ColituServerRow Auto(string? recommended = null) => new()
     {
         IsAuto = true,
         Title = Loc.I["server.auto"],
-        Subtitle = Loc.I["server.autoHint"]
+        Subtitle = recommended is { Length: > 0 } ? Loc.I.Format("server.autoNow", ("server", recommended)) : Loc.I["server.autoHint"]
     };
 
     public static ColituServerRow Header(string title, string hint = "") => new()

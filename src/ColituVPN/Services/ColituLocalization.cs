@@ -599,6 +599,23 @@ public sealed class Loc : INotifyPropertyChanged
         ["tray.disconnect"] = ["Отключить", "Bağlantıyı kes", "Disconnect"],
         ["tray.exit"] = ["Выйти из Colitu", "Colitu’dan çık", "Quit Colitu"],
         ["tray.hidden"] = ["Colitu работает в трее. Защита остаётся включённой.", "Colitu tepside çalışıyor. Koruma açık kalır.", "Colitu is still running in the tray. Protection stays on."],
+        // Adaptive Connect: "best server" moves on when a server carries no traffic on this network.
+        ["connect.tryingOther"] = ["Пробуем другой сервер…", "Başka sunucu deneniyor…", "Trying another server…"],
+        ["server.autoNow"] = ["Сейчас: {server}", "Şu an: {server}", "Now: {server}"],
+        // A server the user picked where every transport failed: one tap to the automatic choice.
+        ["connect.tryFastest"] = ["Попробовать самый быстрый сервер", "En hızlı sunucuyu dene", "Try the fastest server"],
+        // Simple / Advanced mode.
+        ["mode.simple"] = ["Простой режим", "Basit mod", "Simple mode"],
+        ["mode.advanced"] = ["Расширенный режим", "Gelişmiş mod", "Advanced mode"],
+        ["mode.advancedHint"] = ["Раздельное туннелирование, выбор протокола и другое", "Bölünmüş tünel, protokol seçimi ve diğer ayarlar", "Split tunnelling, protocol choice and more"],
+        ["mode.advancedOn"] = ["Расширенный режим включён", "Gelişmiş mod açıldı", "Advanced mode is on"],
+        ["mode.simpleOn"] = ["Простой режим включён", "Basit mod açıldı", "Simple mode is on"],
+        ["mode.advancedSettingsOn"] = ["Включены расширенные настройки", "Gelişmiş ayarlar etkin", "Advanced settings on"],
+        // Warm spare: a second path inside the core.
+        ["settings.warmSpare"] = ["Резервный канал", "Yedek hat", "Warm spare"],
+        ["settings.warmSpareHint"] = ["Второй путь готов заранее: если основной пропадёт, трафик перейдёт на него за несколько секунд без переподключения", "İkinci bir yol hazır bekler: ana yol koparsa trafik birkaç saniyede, yeniden bağlanmadan ona geçer", "A second path stands ready: if the main one drops, traffic moves to it within seconds, without reconnecting"],
+        // In-app notice banner (close button label).
+        ["notice.close"] = ["Закрыть уведомление", "Bildirimi kapat", "Dismiss notice"],
     };
 }
 

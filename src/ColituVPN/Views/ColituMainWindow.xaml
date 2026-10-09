@@ -637,11 +637,29 @@
                                 </StackPanel>
                             </Border>
                             <Button x:Name="UnblockButton" Margin="0,12,0,0" HorizontalAlignment="Center" Click="Unblock_Click" Content="{s:T home.unblock}" Style="{StaticResource LinkButton}" Visibility="Collapsed" />
+                            <!-- A picked server where every transport failed: switch to the automatic choice and connect, only when tapped. -->
+                            <Button x:Name="TryFastestButton" Margin="0,12,0,0" HorizontalAlignment="Center" Click="TryFastest_Click" Content="{s:T connect.tryFastest}" Style="{StaticResource LinkButton}" Visibility="Collapsed" />
                         </StackPanel>
                     </Grid>
 
                     <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="HomeCards">
+                            <!-- Notice from the panel (usage warning, campaign); closable, see ColituMainWindow.Notices.cs. -->
+                            <Border x:Name="NoticeBanner" Margin="0,0,0,16" Padding="18,14,10,14" Background="#0DFFFFFF" BorderBrush="{StaticResource LineStrongBrush}" BorderThickness="1" CornerRadius="20" Visibility="Collapsed">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock x:Name="NoticeTitle" FontSize="14" FontWeight="Bold" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="NoticeBody" Margin="0,4,0,0" FontSize="13" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+                                        <Button x:Name="NoticeAction" Margin="0,8,0,0" HorizontalAlignment="Left" Click="NoticeAction_Click" Style="{StaticResource LinkButton}" Visibility="Collapsed" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Margin="8,-4,0,0" VerticalAlignment="Top" Click="NoticeClose_Click" Content="✕" AutomationProperties.Name="{s:T notice.close}" ToolTip="{s:T notice.close}" Style="{StaticResource LinkButton}" />
+                                </Grid>
+                            </Border>
+
                             <!-- Trial ends within 3 days (dismissible per day). -->
                             <Border x:Name="TrialBanner" Margin="0,0,0,16" Padding="18,16" Background="#149F8CFF" BorderBrush="#599F8CFF" BorderThickness="1" CornerRadius="20" Visibility="Collapsed">
                                 <StackPanel>
@@ -712,8 +730,8 @@
                                 </StackPanel>
                             </Border>
 
-                            <!-- Quick settings -->
-                            <Border Margin="0,16,0,0" Style="{StaticResource Panel}" Padding="20,18,20,12">
+                            <!-- Quick settings (Advanced mode) -->
+                            <Border x:Name="QuickSettingsCard" Margin="0,16,0,0" Style="{StaticResource Panel}" Padding="20,18,20,12">
                                 <StackPanel>
                                     <TextBlock Style="{StaticResource Kicker}" Text="{s:T home.quick}" />
                                     <Border Margin="0,16,0,0" Style="{StaticResource SegmentHost}">
@@ -733,6 +751,9 @@
                                     </Grid>
                                 </StackPanel>
                             </Border>
+                            <!-- Simple mode: hidden expert settings that act, and the one-tap way to Advanced mode. -->
+                            <Button x:Name="AdvancedSettingsOnButton" Margin="0,16,0,0" HorizontalAlignment="Center" Click="AdvancedSettingsOn_Click" Content="{s:T mode.advancedSettingsOn}" FontSize="12.5" Style="{StaticResource LinkButton}" Visibility="Collapsed" />
+                            <Button x:Name="HomeAdvancedButton" Margin="0,12,0,0" HorizontalAlignment="Center" Click="HomeAdvanced_Click" Content="{s:T mode.advanced}" Style="{StaticResource LinkButton}" Visibility="Collapsed" />
                         </StackPanel>
                     </ScrollViewer>
                 </Grid>
@@ -759,7 +780,7 @@
                             <Path Width="16" Height="16" Margin="16,0,0,0" HorizontalAlignment="Left" Data="{StaticResource IconSearch}" IsHitTestVisible="False" Stretch="Uniform" Stroke="{StaticResource DimBrush}" StrokeThickness="1.8" />
                         </Grid>
                     </Grid>
-                    <Border Grid.Row="1" Margin="0,0,0,16" HorizontalAlignment="Left" Style="{StaticResource SegmentHost}">
+                    <Border x:Name="CategoryHost" Grid.Row="1" Margin="0,0,0,16" HorizontalAlignment="Left" Style="{StaticResource SegmentHost}">
                         <StackPanel x:Name="CategoryList" Orientation="Horizontal" />
                     </Border>
                     <Grid Grid.Row="2">
@@ -961,7 +982,21 @@
                     <StackPanel Margin="44,4,40,30">
                         <TextBlock Style="{StaticResource Kicker}" Text="{s:T settings.kicker}" />
                         <TextBlock Margin="0,10,0,0" Style="{StaticResource H1}" Text="{s:T settings.title}" />
-                        <Grid Margin="0,22,0,0">
+                        <!-- Simple / Advanced mode: one switch, at the very top. -->
+                        <Border Margin="0,22,0,0" Padding="24,20" Style="{StaticResource Panel}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,16,0">
+                                    <TextBlock FontSize="14.5" FontWeight="Medium" Text="{s:T mode.advanced}" />
+                                    <TextBlock Margin="0,3,0,0" Style="{StaticResource Small}" Text="{s:T mode.advancedHint}" />
+                                </StackPanel>
+                                <CheckBox x:Name="SettingsAdvanced" Grid.Column="1" Checked="Advanced_Click" Style="{StaticResource Switch}" Unchecked="Advanced_Click" />
+                            </Grid>
+                        </Border>
+                        <Grid Margin="0,16,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="16" />
@@ -1036,6 +1071,17 @@
                                                 <Button Margin="0,6,0,0" HorizontalAlignment="Left" Click="PrivacyScope_Click" Content="{s:T privacy.scope}" FontSize="12.5" Style="{StaticResource LinkButton}" />
                                             </StackPanel>
                                             <CheckBox x:Name="SettingsPrivacy" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
+                                        </Grid>
+                                        <Grid x:Name="SettingsWarmSpareRow" Margin="0,18,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,16,0">
+                                                <TextBlock FontSize="14.5" FontWeight="Medium" Text="{s:T settings.warmSpare}" />
+                                                <TextBlock Margin="0,3,0,0" Style="{StaticResource Small}" Text="{s:T settings.warmSpareHint}" />
+                                            </StackPanel>
+                                            <CheckBox x:Name="SettingsWarmSpare" Grid.Column="1" Checked="Preference_Click" Style="{StaticResource Switch}" Unchecked="Preference_Click" />
                                         </Grid>
                                         <Grid Margin="0,18,0,0">
                                             <Grid.ColumnDefinitions>

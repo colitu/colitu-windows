@@ -22,7 +22,7 @@ public static class ColituLatency
     {
         var index = ColituNetwork.PhysicalInterfaceIndex();
         var probes = servers
-            .Where(server => server.Id.IsNotEmpty() && server.Host.IsNotEmpty() && server.Port is > 0 and < 65536)
+            .Where(CanProbe)
             .GroupBy(server => server.Id!, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .Select(async server => (server.Id!, await MeasureAsync(server.Host!, server.Port!.Value, index)));
@@ -31,6 +31,10 @@ public static class ColituLatency
             .Where(result => result.Item2 != null)
             .ToDictionary(result => result.Item1, result => result.Item2!.Value, StringComparer.OrdinalIgnoreCase);
     }
+
+    /// <summary>The server has a probe address: a missing result from <see cref="MeasureAllAsync"/> means the ping failed.</summary>
+    public static bool CanProbe(ColituVpnServer server) =>
+        server.Id.IsNotEmpty() && server.Host.IsNotEmpty() && server.Port is > 0 and < 65536;
 
     public static async Task<int?> MeasureAsync(string host, int port, int? interfaceIndex)
     {

@@ -210,7 +210,7 @@ public partial class ColituMainWindow
         HookRotationUi();
         var preference = _vpn.Rotation;
         // An older panel has no rotation: the card stays hidden.
-        RotationCard.Visibility = preference == null ? Visibility.Collapsed : Visibility.Visible;
+        RotationCard.Visibility = preference == null || !_vpn.AdvancedMode ? Visibility.Collapsed : Visibility.Visible;
         if (preference == null)
         {
             return;

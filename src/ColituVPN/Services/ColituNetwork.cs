@@ -199,6 +199,47 @@ public static class ColituNetwork
         }
     }
 
+    /// <summary>Bytes sent and received so far on the physical adapter; -1 when unknown.</summary>
+    public static long PhysicalBytes()
+    {
+        try
+        {
+            var statistics = PhysicalInterface()?.GetIPStatistics();
+            return statistics == null ? -1 : statistics.BytesReceived + statistics.BytesSent;
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// The kind of link that carries the internet, for the Adaptive Connect network key: wifi,
+    /// ethernet, cellular (mobile broadband) or other.
+    /// </summary>
+    public static string LinkKind()
+    {
+        var adapter = PhysicalInterface();
+        if (adapter != null)
+        {
+            return adapter.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 ? "wifi" : "ethernet";
+        }
+        try
+        {
+            // Mobile broadband is not a physical adapter above (no IP_UNICAST_IF pinning there).
+            var cellular = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(item => item.OperationalStatus == OperationalStatus.Up)
+                .Where(item => item.NetworkInterfaceType is NetworkInterfaceType.Wwanpp or NetworkInterfaceType.Wwanpp2)
+                .Any(item => item.GetIPProperties().GatewayAddresses
+                    .Any(gateway => gateway.Address.AddressFamily == AddressFamily.InterNetwork && !gateway.Address.Equals(IPAddress.Any)));
+            return cellular ? "cellular" : "other";
+        }
+        catch
+        {
+            return "other";
+        }
+    }
+
     /// <summary>True once any adapter has an IPv4 default route (the network is usable).</summary>
     public static bool HasDefaultRoute()
     {

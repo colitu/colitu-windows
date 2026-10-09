@@ -7,6 +7,13 @@ public static class CoreConfigHandler
 {
     private static readonly string _tag = "CoreConfigHandler";
 
+    /// <summary>
+    /// Colitu: adjusts a generated client config before it is written (the warm spare adds a second
+    /// outbound behind the primary). Gets the context and the JSON, returns the JSON to write.
+    /// Not applied to custom configs.
+    /// </summary>
+    public static Func<CoreConfigContext, string, string>? ClientConfigPostProcessor { get; set; }
+
     public static async Task<RetResult> GenerateClientConfig(CoreConfigContext context, string? fileName)
     {
         var config = AppManager.Instance.Config;
@@ -32,6 +39,10 @@ public static class CoreConfigHandler
         if (result.Success != true)
         {
             return result;
+        }
+        if (node.ConfigType != EConfigType.Custom && ClientConfigPostProcessor is { } postProcess && result.Data?.ToString() is { Length: > 0 } generated)
+        {
+            result.Data = postProcess(context, generated);
         }
         if (fileName.IsNotEmpty() && result.Data != null)
         {

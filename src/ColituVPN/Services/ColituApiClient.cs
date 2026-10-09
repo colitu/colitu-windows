@@ -33,7 +33,16 @@ public sealed class ColituApiClient
             Unlimited = subscription?.Unlimited ?? false,
             Tier = subscription?.Tier ?? "premium",
             Servers = servers,
-            Multihop = MapMultihop(response.Multihop)
+            Multihop = MapMultihop(response.Multihop),
+            ClientCountry = response.ClientCountry?.Trim().ToUpperInvariant() is { Length: 2 } country ? country : null,
+            ClientNetwork = response.ClientNetwork?.Trim() is { Length: > 0 and <= 64 } network ? network : null,
+            NetworkToken = response.NetworkToken?.Trim() is { Length: > 0 and <= 512 } token ? token : null,
+            NetworkHintsBlocked = (response.NetworkHints?.Blocked ?? [])
+                .Where(protocol => !string.IsNullOrWhiteSpace(protocol))
+                .Select(protocol => protocol.Trim().ToLowerInvariant())
+                .Distinct()
+                .Take(8)
+                .ToList()
         };
     }
 
@@ -101,12 +110,14 @@ public sealed class ColituApiClient
     /// <summary>
     /// Fetches the device-bound configuration envelope and converts every
     /// candidate transport into a share link that v2rayN's importer understands.
+    /// <paramref name="node"/> asks for that node for this request only (automatic mode picks it
+    /// itself); without it the panel chooses and never picks a node in <paramref name="exclude"/>.
     /// </summary>
-    public async Task<ColituVpnConfigResponse?> GetConfigAsync(ColituVpnServer? server, CancellationToken token = default)
+    public async Task<ColituVpnConfigResponse?> GetConfigAsync(ColituVpnServer? server, CancellationToken token = default, string? node = null, IEnumerable<string>? exclude = null)
     {
         // A multihop route has its own config endpoint; the envelope is the same as a node's.
         var multihop = server is { IsMultihop: true, Id.Length: > 0 };
-        var path = multihop ? ConfigPathForRoute(server!.Id!) : "/config?protocol=auto";
+        var path = multihop ? ConfigPathForRoute(server!.Id!) : ConfigPath(node, exclude);
         var envelope = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituConfigEnvelopeDto>(path, token);
         if (envelope?.Profile == null)
         {
@@ -211,7 +222,9 @@ public sealed class ColituApiClient
     }
 
     /// <summary>Best-effort report of which transports worked for a node.</summary>
-    public async Task ReportProtocolObservationsAsync(string? nodeId, IEnumerable<ColituProtocolObservation> observations)
+    /// <param name="networkToken">The panel's opaque token of the network the attempt was made on: the
+    /// panel counts the results for that network anonymously (network hints). Null without one.</param>
+    public async Task ReportProtocolObservationsAsync(string? nodeId, IEnumerable<ColituProtocolObservation> observations, string? networkToken = null)
     {
         // The panel rejects the whole batch on a repeated protocol, more than
         // eight entries or a latency outside 0..60000 ms; keep the last result.
@@ -234,7 +247,10 @@ public sealed class ColituApiClient
 
         try
         {
-            await ColituAuthService.Instance.PostAuthorizedAsync("/client/protocol-observations", new { node_id = nodeId, observations = list });
+            object body = string.IsNullOrEmpty(networkToken)
+                ? new { node_id = nodeId, observations = list }
+                : new { node_id = nodeId, observations = list, network_token = networkToken };
+            await ColituAuthService.Instance.PostAuthorizedAsync("/client/protocol-observations", body);
         }
         catch
         {
@@ -249,6 +265,23 @@ public sealed class ColituApiClient
     public Task SendVpnEventAsync(string eventName, string status, string? serverId, string? message, double connectedSeconds) => Task.CompletedTask;
 
     public Task SendStabilityLogAsync(string eventName, string state, ColituVpnServer? server, string? reason, string? error) => Task.CompletedTask;
+
+    /// <summary><c>/config?protocol=auto</c>, plus <c>node=</c> or <c>exclude=</c> (at most 10 ids).</summary>
+    internal static string ConfigPath(string? node, IEnumerable<string>? exclude)
+    {
+        var path = "/config?protocol=auto";
+        if (!string.IsNullOrWhiteSpace(node))
+        {
+            return $"{path}&node={Uri.EscapeDataString(node.Trim())}";
+        }
+        var ids = (exclude ?? [])
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(ColituAdaptiveConnect.MaxExclude)
+            .ToList();
+        return ids.Count == 0 ? path : $"{path}&exclude={string.Join(",", ids.Select(Uri.EscapeDataString))}";
+    }
 
     internal static string ConfigPathForRoute(string routeId) => $"/multihop/routes/{Uri.EscapeDataString(routeId)}/config";
 
@@ -833,6 +866,22 @@ internal sealed class ColituServerListDto
     [JsonPropertyName("servers")] public List<ColituServerDto>? Servers { get; set; }
     /// <summary>Multihop routes; absent from an older panel.</summary>
     [JsonPropertyName("multihop")] public List<ColituServerDto>? Multihop { get; set; }
+    /// <summary>Country of the request IP; empty when unknown or through a Colitu exit, absent from an older panel.</summary>
+    [JsonPropertyName("client_country")] public string? ClientCountry { get; set; }
+    /// <summary>Opaque key of the user's ISP network (only used in the network key).</summary>
+    [JsonPropertyName("client_network")] public string? ClientNetwork { get; set; }
+    /// <summary>Opaque token of that network (valid 48 h), sent back with protocol observations.</summary>
+    [JsonPropertyName("network_token")] public string? NetworkToken { get; set; }
+    /// <summary>Protocols that fail for most devices on that network; absent when none or too little data.</summary>
+    [JsonPropertyName("network_hints")] public ColituNetworkHintsDto? NetworkHints { get; set; }
+}
+
+internal sealed class ColituNetworkHintsDto
+{
+    [JsonPropertyName("blocked")] public List<string>? Blocked { get; set; }
+    /// <summary>"network" (this ISP network) or "country" (too little data for the network).</summary>
+    [JsonPropertyName("scope")] public string? Scope { get; set; }
+    [JsonPropertyName("updated_at")] public string? UpdatedAt { get; set; }
 }
 
 /// <summary>One end of a multihop route (or the exit a rotation currently uses).</summary>

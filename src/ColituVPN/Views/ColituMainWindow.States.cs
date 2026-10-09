@@ -379,7 +379,7 @@ public partial class ColituMainWindow
             return;
         }
         var proxy = _vpn.ProxyCoverageLimited;
-        ProxyCoverageChip.Visibility = proxy ? Visibility.Visible : Visibility.Collapsed;
+        ProxyCoverageChip.Visibility = proxy && _vpn.AdvancedMode ? Visibility.Visible : Visibility.Collapsed;
         ProxyCoverageChipText.Text = Loc.I["proxy.chip"].ToUpper(Loc.I.Culture);
         ProxyCoverageChip.ToolTip = Loc.I["proxy.coverage"];
     }
@@ -399,7 +399,7 @@ public partial class ColituMainWindow
         var preferences = _vpn.Preferences;
         var tun = preferences.IsTunMode;
         var active = ColituSplitTunnel.IsActive(preferences, tun);
-        SplitChip.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        SplitChip.Visibility = active && _vpn.AdvancedMode ? Visibility.Visible : Visibility.Collapsed;
         if (active)
         {
             var count = Loc.I.Count("entry", ColituSplitTunnel.EntryCount(preferences, tun));
