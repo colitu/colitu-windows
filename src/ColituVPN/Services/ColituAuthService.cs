@@ -474,7 +474,7 @@ public sealed class ColituAuthService
                 && ColituMfa.ParseChallenge(await response.Content.ReadAsStringAsync()) is { } challenge)
             {
                 // The password was right; the account wants the code from the authenticator app.
-                return ColituAuthResult.Mfa(email, challenge.Token, challenge.ExpiresIn);
+                return ColituAuthResult.Mfa(email, challenge.Token, challenge.ExpiresIn, challenge.Method);
             }
             await EnsureSuccessAsync(response);
             var tokens = await ReadJsonAsync<ColituTokenDto>(response);
@@ -1212,6 +1212,9 @@ public sealed class ColituAuthService
         {
             "AUTH_INVALID_CREDENTIALS" => loc["err.credentials"],
             "INVALID_REGISTRATION" => loc["err.registration"],
+            "DISPOSABLE_EMAIL" => loc["err.disposableEmail"],
+            "PASSWORD_BREACHED" => loc["err.passwordBreached"],
+            "SIGNUP_IP_LIMIT" => loc["err.signupIpLimit"],
             "RATE_LIMITED" => loc["err.rateLimited"],
             "DEVICE_LIMIT_REACHED" or "DEVICE_LIMIT_EXCEEDED" => loc["err.deviceLimit"],
             "REGION_NOT_SUPPORTED" => loc["err.region"],
@@ -1319,6 +1322,9 @@ public sealed class ColituAuthResult
     /// <summary>Password accepted; the two-factor code step comes next with this token.</summary>
     public string? MfaToken { get; init; }
     public int MfaExpiresIn { get; init; }
+    /// <summary>"totp" (authenticator app) or "email" (code mailed after an unfamiliar-country sign-in).</summary>
+    public string MfaMethod { get; init; } = ColituMfa.MethodTotp;
+    public bool MfaByEmail => string.Equals(MfaMethod, ColituMfa.MethodEmail, StringComparison.Ordinal);
     public bool RequiresMfa => MfaToken != null;
     /// <summary>Signed in, but the plan's device limit pauses this computer.</summary>
     public ColituDeviceOverLimit? DevicePaused { get; init; }
@@ -1335,7 +1341,7 @@ public sealed class ColituAuthResult
         Message = message
     };
     public static ColituAuthResult Fail(string error, string? code = null) => new() { Success = false, Error = error, ErrorCode = code };
-    public static ColituAuthResult Mfa(string email, string token, int expiresIn) => new() { Success = false, MfaToken = token, MfaExpiresIn = expiresIn, Message = email };
+    public static ColituAuthResult Mfa(string email, string token, int expiresIn, string method = ColituMfa.MethodTotp) => new() { Success = false, MfaToken = token, MfaExpiresIn = expiresIn, MfaMethod = method, Message = email };
     public static ColituAuthResult Paused(string email, ColituDeviceOverLimit? info) => new() { Success = true, DevicePaused = info ?? new ColituDeviceOverLimit(), Message = email };
     public static ColituAuthResult Verification(string email) => new() { Success = true, RequiresEmailVerification = true, Message = email };
 }

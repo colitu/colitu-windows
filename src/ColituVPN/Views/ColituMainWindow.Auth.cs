@@ -51,6 +51,7 @@ public partial class ColituMainWindow
         AuthSubtitle.Text = Loc.I[_registerMode ? "auth.registerSub" : "auth.loginSub"];
         AuthSubmitText.Text = Loc.I[_registerMode ? "auth.submitRegister" : "auth.submitLogin"];
         RegisterFields.Visibility = _registerMode ? Visibility.Visible : Visibility.Collapsed;
+        RegisterEmailHint.Visibility = _registerMode ? Visibility.Visible : Visibility.Collapsed;
         ForgotButton.Visibility = _registerMode ? Visibility.Collapsed : Visibility.Visible;
     }
 

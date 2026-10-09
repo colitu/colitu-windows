@@ -774,7 +774,11 @@ public static class ColituShareLinkBuilder
                 {
                     return null;
                 }
-                return $"hysteria2://{Uri.EscapeDataString(password!)}@{address}:{port}?sni={Uri.EscapeDataString(sni!)}&insecure=0{fragment}";
+                // Port hopping: the panel sends transport.hop_ports ("20000-40000") for nodes that
+                // redirect that UDP range to Hysteria; as mport= the core hops ports every 30 s.
+                var hop = HopRange(Str(transport, "hop_ports"));
+                var mport = hop == null ? "" : $"&mport={hop}";
+                return $"hysteria2://{Uri.EscapeDataString(password!)}@{address}:{port}?sni={Uri.EscapeDataString(sni!)}&insecure=0{mport}{fragment}";
             }
             case "shadowsocks":
             {
@@ -798,6 +802,20 @@ public static class ColituShareLinkBuilder
         return parent is { ValueKind: JsonValueKind.Object } p && p.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Object
             ? value
             : null;
+    }
+
+    /// <summary>A well-formed "from-to" UDP port range (1-65535, from below to), else null.</summary>
+    internal static string? HopRange(string? value)
+    {
+        var parts = value?.Trim().Split('-');
+        if (parts is not { Length: 2 }
+            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var from)
+            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var to)
+            || from < 1 || to > 65535 || from >= to)
+        {
+            return null;
+        }
+        return $"{from}-{to}";
     }
 
     private static string? Str(JsonElement? parent, string name)

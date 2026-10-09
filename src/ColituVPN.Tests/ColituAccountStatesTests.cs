@@ -20,6 +20,18 @@ public class ColituAccountStatesTests
     }
 
     [Theory]
+    [InlineData("""{"error":{"code":"MFA_REQUIRED"},"mfa_token":"t","mfa_method":"email","mfa_expires_in":600}""", "email", 600)]
+    [InlineData("""{"error":{"code":"MFA_REQUIRED"},"mfa_token":"t","mfa_method":"totp"}""", "totp", 300)]
+    [InlineData("""{"error":{"code":"MFA_REQUIRED"},"mfa_token":"t"}""", "totp", 300)]
+    public void MfaChallenge_ReadsTheMethod(string body, string method, int expires)
+    {
+        var challenge = ColituMfa.ParseChallenge(body);
+        challenge.Should().NotBeNull();
+        challenge!.Method.Should().Be(method);
+        challenge.ExpiresIn.Should().Be(expires);
+    }
+
+    [Theory]
     [InlineData("""{"error":{"code":"MFA_REQUIRED_UPDATE_APP"}}""")]
     [InlineData("""{"error":{"code":"MFA_REQUIRED"}}""")]
     [InlineData("""{"error":{"code":"MFA_REQUIRED"},"mfa_token":""}""")]

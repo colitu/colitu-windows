@@ -8,6 +8,31 @@ namespace v2rayN.Tests;
 public class ColituHysteria2Tests
 {
     [Fact]
+    public void Hysteria2Payload_WithAHopRange_CarriesItAsMport()
+    {
+        var payload = JsonDocument.Parse("""{"schema_version":1,"protocol":"hysteria2","endpoint":{"host":"vpn.example.com","port":8443},"credentials":{"password":"p"},"transport":{"type":"hysteria","hop_ports":"20000-40000","hop_interval":30},"security":{"type":"tls","server_name":"vpn.example.com"}}""").RootElement.Clone();
+
+        var link = ColituShareLinkBuilder.Build(payload, "Colitu ee", "203.0.113.7");
+
+        link.Should().Be("hysteria2://p@203.0.113.7:8443?sni=vpn.example.com&insecure=0&mport=20000-40000#Colitu%20ee");
+    }
+
+    [Theory]
+    [InlineData("20000-40000", "20000-40000")]
+    [InlineData(" 20000-40000 ", "20000-40000")]
+    [InlineData("40000-20000", null)]
+    [InlineData("0-100", null)]
+    [InlineData("20000-70000", null)]
+    [InlineData("20000", null)]
+    [InlineData("20000-40000,50000", null)]
+    [InlineData("a-b", null)]
+    [InlineData(null, null)]
+    public void HopRange_AcceptsOnlyAPlainPortRange(string? value, string? expected)
+    {
+        ColituShareLinkBuilder.HopRange(value).Should().Be(expected);
+    }
+
+    [Fact]
     public void Hysteria2Payload_BecomesAHysteria2Link()
     {
         var payload = JsonDocument.Parse("""{"schema_version":1,"protocol":"hysteria2","endpoint":{"host":"vpn.example.com","port":8443},"credentials":{"password":"p@ss word"},"transport":{"type":"hysteria"},"security":{"type":"tls","server_name":"vpn.example.com"}}""").RootElement.Clone();

@@ -83,6 +83,14 @@ public class ColituRuDirectTests
     }
 
     [Fact]
+    public void PrivacyMode_IsOnForNewInstalls_OffForSavedStatesWithoutTheProperty()
+    {
+        ColituVpnPreferences.ForNewInstall().PrivacyModeEnabled.Should().BeTrue();
+        ColituVpnPreferences.ForNewInstall().RuDirectNoticeShown.Should().BeFalse();
+        ColituVpnService.RussianSitesDirect("DE", ColituVpnPreferences.ForNewInstall().PrivacyModeEnabled).Should().BeFalse();
+    }
+
+    [Fact]
     public void PrivacyMode_IsOffByDefault_AlsoForStatesSavedByOlderBuilds()
     {
         new ColituVpnPreferences().PrivacyModeEnabled.Should().BeFalse();

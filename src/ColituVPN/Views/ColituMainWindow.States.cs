@@ -15,6 +15,7 @@ public partial class ColituMainWindow
     private string? _mfaToken;
     private string _mfaEmail = "";
     private bool _mfaRecovery;
+    private bool _mfaByEmail;
     private bool _mfaBusy;
     private string? _mfaLastAutoCode;
     private DateTime _mfaExpiresAt;
@@ -25,6 +26,7 @@ public partial class ColituMainWindow
         _mfaEmail = challenge.Message ?? EmailBox.Text.Trim();
         _mfaExpiresAt = DateTime.UtcNow.AddSeconds(Math.Max(30, challenge.MfaExpiresIn));
         _mfaRecovery = false;
+        _mfaByEmail = challenge.MfaByEmail;
         _mfaLastAutoCode = null;
         ShowView(MfaView);
         HideMfaError();
@@ -38,8 +40,21 @@ public partial class ColituMainWindow
         {
             return;
         }
-        MfaSubtitle.Text = _mfaRecovery ? Loc.I["mfa.subRecovery"] : Loc.I.Format("mfa.sub", ("email", _mfaEmail));
-        MfaCodeLabel.Text = Loc.I[_mfaRecovery ? "mfa.recoveryCode" : "mfa.code"];
+        if (_mfaByEmail)
+        {
+            // Unfamiliar-country sign-in: the code came by e-mail, there are no recovery codes to offer.
+            _mfaRecovery = false;
+            MfaTitle.Text = Loc.I["mfa.loginEmailTitle"];
+            MfaSubtitle.Text = Loc.I["mfa.loginEmailBody"];
+            MfaModeButton.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            MfaTitle.Text = Loc.I["mfa.title"];
+            MfaSubtitle.Text = _mfaRecovery ? Loc.I["mfa.subRecovery"] : Loc.I.Format("mfa.sub", ("email", _mfaEmail));
+            MfaModeButton.Visibility = Visibility.Visible;
+        }
+        MfaCodeLabel.Text = Loc.I[_mfaRecovery ? "mfa.recoveryCode" : _mfaByEmail ? "mfa.codeEmail" : "mfa.code"];
         MfaModeText.Text = Loc.I[_mfaRecovery ? "mfa.useApp" : "mfa.useRecovery"];
         // Six digits in a large box; recovery codes are longer and carry letters and dashes.
         MfaCodeBox.MaxLength = _mfaRecovery ? ColituMfa.MaxRecoveryCodeLength : ColituMfa.CodeLength;

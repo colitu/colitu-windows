@@ -296,6 +296,7 @@
 
                                 <TextBlock Margin="2,22,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.email}" />
                                 <TextBox x:Name="EmailBox" MaxLength="254" KeyDown="AuthField_KeyDown" Style="{StaticResource Field}" Tag="{s:T auth.emailHint}" />
+                                <TextBlock x:Name="RegisterEmailHint" Margin="2,6,0,0" FontSize="12" Foreground="{StaticResource MutedBrush}" Text="{s:T auth.registerEmailHint}" TextWrapping="Wrap" Visibility="Collapsed" />
 
                                 <TextBlock Margin="2,16,0,8" Style="{StaticResource FieldLabel}" Text="{s:T auth.password}" />
                                 <Grid>
@@ -431,7 +432,7 @@
                         <Path Width="26" Height="26" Data="{StaticResource IconShield}" Stretch="Uniform" Stroke="{StaticResource LilacBrush}" StrokeLineJoin="Round" StrokeThickness="1.8" />
                     </Grid>
                     <TextBlock Margin="0,24,0,0" Style="{StaticResource Kicker}" Text="{s:T mfa.kicker}" />
-                    <TextBlock Margin="0,10,0,0" Style="{StaticResource H1}" Text="{s:T mfa.title}" />
+                    <TextBlock x:Name="MfaTitle" Margin="0,10,0,0" Style="{StaticResource H1}" Text="{s:T mfa.title}" />
                     <TextBlock x:Name="MfaSubtitle" Margin="0,10,0,0" Style="{StaticResource Muted}" TextWrapping="Wrap" />
                     <TextBlock x:Name="MfaCodeLabel" Margin="2,26,0,8" Style="{StaticResource FieldLabel}" />
                     <TextBox x:Name="MfaCodeBox" Height="66" Padding="16,0" FontSize="30" FontWeight="SemiBold" InputMethod.IsInputMethodEnabled="False" DataObject.Pasting="MfaCode_Pasting" KeyDown="MfaCode_KeyDown" MaxLength="6" PreviewTextInput="MfaCode_PreviewTextInput" TextChanged="MfaCode_TextChanged" Style="{StaticResource Field}" TextAlignment="Center" />

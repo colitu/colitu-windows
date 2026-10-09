@@ -13,7 +13,11 @@ public static class ColituMfa
     public const int CodeLength = 6;
     public const int MaxRecoveryCodeLength = 64;
 
-    public sealed record Challenge(string Token, int ExpiresIn);
+    public const string MethodTotp = "totp";
+    public const string MethodEmail = "email";
+
+    /// <summary>Method: "totp" (authenticator app, the default) or "email" (6-digit code mailed after an unfamiliar-country sign-in).</summary>
+    public sealed record Challenge(string Token, int ExpiresIn, string Method = MethodTotp);
 
     public static Challenge? ParseChallenge(string? body)
     {
@@ -34,7 +38,11 @@ public static class ColituMfa
             var expires = root.TryGetProperty("mfa_expires_in", out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var seconds)
                 ? Math.Clamp(seconds, 30, 3600)
                 : 300;
-            return new Challenge(token.GetString()!, expires);
+            var method = root.TryGetProperty("mfa_method", out var methodValue) && methodValue.ValueKind == JsonValueKind.String
+                && string.Equals(methodValue.GetString(), MethodEmail, StringComparison.OrdinalIgnoreCase)
+                ? MethodEmail
+                : MethodTotp;
+            return new Challenge(token.GetString()!, expires, method);
         }
         catch (JsonException)
         {

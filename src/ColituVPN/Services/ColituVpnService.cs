@@ -3008,7 +3008,9 @@ public sealed class ColituVpnService
         {
             if (!File.Exists(StatePath()))
             {
-                _session = _session with { PreferencesMigration = CurrentPreferencesMigration };
+                // Fresh install: privacy mode (all traffic through the VPN) is the default. A saved state
+                // without the property keeps the old behaviour (the record default stays false).
+                _session = _session with { PreferencesMigration = CurrentPreferencesMigration, Preferences = ColituVpnPreferences.ForNewInstall() };
                 return;
             }
             var json = File.ReadAllText(StatePath());
@@ -3393,6 +3395,7 @@ public sealed record ColituVpnPreferences(
     bool CloseToTray = true,
     bool AdBlockEnabled = false,
     // Privacy mode: no direct-routing exceptions (Russian sites and addresses go through the tunnel too).
+    // Off here so states saved before the setting existed keep their behaviour; new installs start with ForNewInstall() (on).
     bool PrivacyModeEnabled = false,
     // The one-time notice about Russian sites leaving outside the tunnel has been shown.
     bool RuDirectNoticeShown = false,
@@ -3407,6 +3410,9 @@ public sealed record ColituVpnPreferences(
     // Local date (yyyy-MM-dd) the trial-ending banner was dismissed; it comes back the next day.
     string? TrialBannerDismissedOn = null)
 {
+    /// <summary>Preferences of a first run (no saved state yet): privacy mode on. The record default stays false for saved states that predate the setting.</summary>
+    public static ColituVpnPreferences ForNewInstall() => new() { PrivacyModeEnabled = true };
+
     public bool IsTunMode => string.Equals(ConnectionMode, ColituConnectionModes.Tun, StringComparison.OrdinalIgnoreCase);
 
     public ColituVpnPreferences Normalize()
