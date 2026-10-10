@@ -65,6 +65,10 @@ public sealed class ColituVpnService
     private volatile ColituVerifyInbound? _verifyInbound;
     /// <summary>The running core's second check inbound, to the spare alone; null without a spare.</summary>
     private volatile ColituVerifyInbound? _spareVerifyInbound;
+    /// <summary>The tunnel as a whole (<see cref="ColituWarmSpare.CheckInboundTag"/>), set at every core start.</summary>
+    private volatile ColituVerifyInbound? _checkInbound;
+    /// <summary>The profile whose config gets the check inbound (not the TUN front of an Xray tunnel).</summary>
+    private volatile string? _checkIndexId;
     /// <summary>Adaptive Connect 2.0 mid-session watcher (every transport; spare-aware).</summary>
     private readonly ColituTunnelWatch _watch = new();
     private readonly ColituSpareHealth _spareHealth = new();
@@ -112,7 +116,7 @@ public sealed class ColituVpnService
     {
         LoadState();
         // The warm spare goes into the generated core config before the core starts.
-        CoreConfigHandler.ClientConfigPostProcessor = ApplyWarmSpare;
+        CoreConfigHandler.ClientConfigPostProcessor = PostProcessConfig;
         DeleteLegacyConfigCache();
         StartWatchdog();
         // Instantly, not at the next watchdog tick.
@@ -811,7 +815,40 @@ public sealed class ColituVpnService
         preferences.WarmSpareEnabled && server is not { IsMultihop: true } && config.Server is not { IsMultihop: true };
 
     /// <summary>
-    /// <see cref="CoreConfigHandler.ClientConfigPostProcessor"/>: adds the planned spare to the main
+    /// <see cref="CoreConfigHandler.ClientConfigPostProcessor"/>: the warm spare, then the tunnel
+    /// check inbound, to the main core's config.
+    /// </summary>
+    private string PostProcessConfig(CoreConfigContext context, string json)
+    {
+        json = ApplyWarmSpare(context, json);
+        if (_checkIndexId == null || !string.Equals(context.Node?.IndexId, _checkIndexId, StringComparison.Ordinal))
+        {
+            return json;
+        }
+        try
+        {
+            var check = ColituWarmSpare.NewVerifyInbound();
+            if (ColituWarmSpare.AddCheckInbound(json, context.RunCoreType == ECoreType.sing_box, check) is { } added)
+            {
+                _checkInbound = check;
+                return added;
+            }
+            LogConnection("Tunnel check inbound could not be added; checks use the local proxy port");
+        }
+        catch (Exception ex)
+        {
+            Logging.SaveLog("ColituVpnService.AddCheckInbound", ex);
+        }
+        return json;
+    }
+
+    /// <summary>Where a check of the whole tunnel goes: the check inbound, else the local proxy port (routing rules apply there).</summary>
+    private (int Port, NetworkCredential? Credentials) TunnelCheckTarget() => _checkInbound is { } check
+        ? (check.Port, new NetworkCredential(check.User, check.Password))
+        : (AppManager.Instance.GetLocalPort(EInboundProtocol.socks), null);
+
+    /// <summary>
+    /// Adds the planned spare to the main
     /// core's config (the TUN front of an Xray tunnel and other configs stay as generated). Any
     /// problem leaves the config without a spare.
     /// </summary>
@@ -1454,9 +1491,9 @@ public sealed class ColituVpnService
             return;
         }
         _lastTrafficCheckAt = now;
-        var port = AppManager.Instance.GetLocalPort(EInboundProtocol.socks);
+        var (port, credentials) = TunnelCheckTarget();
         var verify = _verifyInbound;
-        var normalTask = ProbeThroughLocalProxyAsync(port, 1, roundTimeout: WatchProbeTimeout);
+        var normalTask = ProbeThroughLocalProxyAsync(port, 1, roundTimeout: WatchProbeTimeout, credentials: credentials);
         var primaryTask = verify == null ? null
             : ProbeThroughLocalProxyAsync(verify.Port, 1, roundTimeout: WatchProbeTimeout, credentials: new NetworkCredential(verify.User, verify.Password));
         var normal = await normalTask;
@@ -2138,7 +2175,8 @@ public sealed class ColituVpnService
             {
                 return;
             }
-            var probe = await ProbeThroughLocalProxyAsync(AppManager.Instance.GetLocalPort(EInboundProtocol.socks));
+            var (port, credentials) = TunnelCheckTarget();
+            var probe = await ProbeThroughLocalProxyAsync(port, credentials: credentials);
             if (!probe.Success && CanHeal())
             {
                 // Connections to the server died while the computer slept.
@@ -3462,6 +3500,8 @@ public sealed class ColituVpnService
         // Set again by the warm spare when this config gets one.
         _verifyInbound = null;
         _spareVerifyInbound = null;
+        _checkInbound = null;
+        _checkIndexId = profileItem.IndexId;
         await CoreManager.Instance.LoadCore(mainContext, allResult.PreSocksResult?.Context);
 
         // The core needs a moment to load its geo data, longer on the first run
@@ -3572,7 +3612,8 @@ public sealed class ColituVpnService
 
     /// <param name="primaryOnly">
     /// The connect check: with a warm spare in the config, probe through the <c>colitu-verify</c>
-    /// inbound, which reaches the primary outbound only. Recovery checks use the normal path.
+    /// inbound, which reaches the primary outbound only. Otherwise (and for recovery checks) the
+    /// <c>colitu-check</c> inbound, the tunnel as a whole; never the routing rules.
     /// </param>
     private async Task<ColituTrafficProbeResult> VerifyConnectionActiveAsync(ColituVpnServer? server, int rounds = 2, CancellationToken token = default, TimeSpan? roundTimeout = null, bool primaryOnly = false)
     {
@@ -3601,10 +3642,10 @@ public sealed class ColituVpnService
         {
             LogConnection($"Checking the primary alone (warm spare in the config), loopback port {verify.Port}");
         }
+        var (port, credentials) = verify != null ? (verify.Port, new NetworkCredential(verify.User, verify.Password)) : TunnelCheckTarget();
         // The server refusing our credentials will not change in a second round.
-        var probe = await ProbeThroughLocalProxyAsync(verify?.Port ?? socksPort, rounds, token,
-            () => _lastCoreMessage?.Contains("authentication failed", StringComparison.OrdinalIgnoreCase) == true, roundTimeout,
-            verify == null ? null : new NetworkCredential(verify.User, verify.Password));
+        var probe = await ProbeThroughLocalProxyAsync(port, rounds, token,
+            () => _lastCoreMessage?.Contains("authentication failed", StringComparison.OrdinalIgnoreCase) == true, roundTimeout, credentials);
         if (!await tunReady)
         {
             throw new InvalidOperationException("VPN tunnel adapter or route was not activated.");

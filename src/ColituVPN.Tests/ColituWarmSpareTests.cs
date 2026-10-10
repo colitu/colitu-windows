@@ -190,6 +190,51 @@ public class ColituWarmSpareTests
         first["outbound"]!.GetValue<string>().Should().Be("proxy-main");
     }
 
+    private static readonly ColituVerifyInbound Check = new(41300, "c1", "c2");
+
+    private static string FirstRuleTarget(JsonNode root, bool singBox)
+    {
+        var first = singBox ? root["route"]!["rules"]![0]! : root["routing"]!["rules"]![0]!;
+        var inbound = (singBox ? first["inbound"] : first["inboundTag"])!.AsArray().Select(item => item!.GetValue<string>()).ToList();
+        inbound.Should().Equal("colitu-check");
+        return singBox ? first["outbound"]!.GetValue<string>()
+            : first["balancerTag"] is { } balancer ? "balancer:" + balancer.GetValue<string>() : first["outboundTag"]!.GetValue<string>();
+    }
+
+    /// <summary>
+    /// The tunnel check never follows the routing rules: a rule sending the check hosts direct
+    /// (split tunnelling's "everything else direct", a site list) made a dead tunnel look alive.
+    /// </summary>
+    [Fact]
+    public void CheckInbound_GoesToTheWholeTunnel_BeforeEveryRule_WithOrWithoutASpare()
+    {
+        var singbox = JsonNode.Parse(ColituWarmSpare.AddCheckInbound(SingboxConfig, true, Check)!)!;
+        FirstRuleTarget(singbox, true).Should().Be("proxy", "without a spare proxy is the server itself");
+        var inbound = singbox["inbounds"]!.AsArray().Single(item => item!["tag"]!.GetValue<string>() == "colitu-check")!;
+        inbound["listen"]!.GetValue<string>().Should().Be("127.0.0.1");
+        inbound["users"]![0]!["password"]!.GetValue<string>().Should().Be("c2");
+
+        var spare = JsonNode.Parse("""{ "type": "vless", "tag": "proxy", "server": "203.0.113.7", "server_port": 443 }""")!.AsObject();
+        var withSpare = JsonNode.Parse(ColituWarmSpare.AddCheckInbound(ColituWarmSpare.ApplySingbox(SingboxConfig, spare, verify: Verify)!, true, Check)!)!;
+        FirstRuleTarget(withSpare, true).Should().Be("proxy", "the urltest group over primary and spare");
+
+        var xray = JsonNode.Parse(ColituWarmSpare.AddCheckInbound(XrayConfig, false, Check)!)!;
+        FirstRuleTarget(xray, false).Should().Be("proxy");
+        xray["inbounds"]!.AsArray().Single(item => item!["tag"]!.GetValue<string>() == "colitu-check")!["settings"]!["auth"]!.GetValue<string>().Should().Be("password");
+
+        var xrayWithSpare = JsonNode.Parse(ColituWarmSpare.AddCheckInbound(ColituWarmSpare.ApplyXray(XrayConfig, XraySpare(), verify: Verify)!, false, Check)!)!;
+        FirstRuleTarget(xrayWithSpare, false).Should().Be("balancer:proxy-auto");
+        // The primary check keeps its own rule.
+        xrayWithSpare["routing"]!["rules"]!.AsArray().Should().Contain(rule => rule!["inboundTag"] != null && rule["inboundTag"]!.ToJsonString().Contains("\"colitu-verify\"") && rule["outboundTag"]!.GetValue<string>() == "proxy");
+    }
+
+    [Fact]
+    public void CheckInbound_NotAdded_WithoutAProxyOutbound()
+    {
+        ColituWarmSpare.AddCheckInbound(XrayConfig.Replace("\"tag\": \"proxy\"", "\"tag\": \"other\""), false, Check).Should().BeNull();
+        ColituWarmSpare.AddCheckInbound("not json", true, Check).Should().BeNull();
+    }
+
     [Fact]
     public void VerifyInbound_HasAFreeLoopbackPortAndRandomCredentials()
     {

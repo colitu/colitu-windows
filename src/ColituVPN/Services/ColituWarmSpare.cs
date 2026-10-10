@@ -44,6 +44,13 @@ public static class ColituWarmSpare
     public const string VerifyInboundTag = "colitu-verify";
     /// <summary>Second check inbound, to the spare alone (exists only while a spare is attached).</summary>
     public const string SpareVerifyInboundTag = "colitu-verify-spare";
+    /// <summary>
+    /// Check inbound to the tunnel as a whole (the primary, or the primary/spare group), in every
+    /// config: the watcher, resume and restart checks run through it, so no routing rule (split
+    /// tunnelling's "everything else direct", a site list, regional direct rules) can send a check
+    /// around a dead tunnel and call it working.
+    /// </summary>
+    public const string CheckInboundTag = "colitu-check";
     /// <summary>Xray sockopt on TCP outbounds with a spare attached: a dead TCP path fails after 10 s, not minutes.</summary>
     public const int TcpUserTimeoutMs = 10000;
     /// <summary>sing-box urltest interval (its test timeout is a fixed 15 s; a failed dial switches at once).</summary>
@@ -244,7 +251,33 @@ public static class ColituWarmSpare
         return root.ToJsonString(Indented);
     }
 
-    private static void AddXrayVerify(JsonObject root, JsonArray rules, ColituVerifyInbound? verify, string tag, string outbound)
+    /// <summary>
+    /// Adds the <see cref="CheckInboundTag"/> inbound, its rule first: to <c>proxy</c> (sing-box: the
+    /// primary, or the urltest group over primary and spare; Xray: the primary, or the balancer when a
+    /// spare is attached). Null when the config has no <c>proxy</c> outbound.
+    /// </summary>
+    public static string? AddCheckInbound(string config, bool singBox, ColituVerifyInbound check)
+    {
+        if (Parse(config) is not { } root || root["outbounds"] is not JsonArray outbounds
+            || !outbounds.OfType<JsonObject>().Any(item => Tag(item) == ProxyTag))
+        {
+            return null;
+        }
+        if (singBox)
+        {
+            AddSingboxVerify(root, check, CheckInboundTag, ProxyTag);
+            return root.ToJsonString(Indented);
+        }
+        var routing = root["routing"] as JsonObject ?? new JsonObject();
+        root["routing"] = routing;
+        var rules = routing["rules"] as JsonArray ?? new JsonArray();
+        routing["rules"] = rules;
+        var balanced = routing["balancers"] is JsonArray balancers && balancers.OfType<JsonObject>().Any(item => Tag(item) == XrayBalancerTag);
+        AddXrayVerify(root, rules, check, CheckInboundTag, balanced ? null : ProxyTag, balanced ? XrayBalancerTag : null);
+        return root.ToJsonString(Indented);
+    }
+
+    private static void AddXrayVerify(JsonObject root, JsonArray rules, ColituVerifyInbound? verify, string tag, string? outbound, string? balancer = null)
     {
         if (verify == null)
         {
@@ -265,7 +298,9 @@ public static class ColituWarmSpare
                 ["udp"] = false
             }
         });
-        rules.Insert(0, new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray(tag), ["outboundTag"] = outbound });
+        var rule = new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray(tag) };
+        rule[balancer != null ? "balancerTag" : "outboundTag"] = balancer ?? outbound;
+        rules.Insert(0, rule);
     }
 
     /// <summary>
