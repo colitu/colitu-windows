@@ -255,8 +255,8 @@ public class ColituKillSwitchServiceTests
         Networks(withoutLan).Should().Contain("169.254.0.0/16");
         withoutLan.Should().Contain(filter => filter.Layer == KsLayer.ConnectV4 && filter.Conditions.OfType<KsRemotePort>().Any(port => port.Port == 67));
         // ...but only from the DHCP client port: remote port 67/547 alone is a way out of the tunnel.
-        withoutLan.Where(filter => filter.Permit && filter.Conditions.OfType<KsRemotePort>().Any(port => port.Port is 67 or 547))
-            .Should().OnlyContain(filter => filter.Conditions.OfType<KsLocalPort>().Any(port => port.Port is 68 or 546));
+        withoutLan.Where(filter => filter.Permit && filter.Conditions.OfType<KsRemotePort>().Any(port => port.Port == 67 || port.Port == 547))
+            .Should().OnlyContain(filter => filter.Conditions.OfType<KsLocalPort>().Any(port => port.Port == 68 || port.Port == 546));
     }
 
     [Fact]
