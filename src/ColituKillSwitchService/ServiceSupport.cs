@@ -69,7 +69,9 @@ internal static class KsPaths
     // Standard users may create folders under %ProgramData%. A folder someone
     // else created keeps them as owner (WRITE_DAC) and may be a junction or hold
     // planted hard links, so SYSTEM's log/state writes could land elsewhere.
-    // Such a folder is never reused: it is deleted and created again.
+    // Such a folder is never reused: it is moved aside and created again. It is
+    // never deleted: a recursive delete by SYSTEM walks a tree its owner controls
+    // (junctions swapped in during the walk turn it into deleting any file).
     private static void EnsureTrusted(string path)
     {
         for (var attempt = 0; attempt < Attempts; attempt++)
@@ -77,10 +79,10 @@ internal static class KsPaths
             var info = new DirectoryInfo(path);
             if (info.Exists && !IsTrusted(info))
             {
-                // On a reparse point Delete() removes only the link, never the target.
-                if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) info.Delete();
-                else info.Delete(recursive: true);
-                info.Refresh();
+                // A rename on the same volume moves only the entry (a reparse point
+                // moves as the link itself) and never opens anything inside it.
+                info.MoveTo($"{path}.untrusted-{Guid.NewGuid():N}");
+                info = new DirectoryInfo(path);
             }
             var created = !info.Exists;
             if (created)

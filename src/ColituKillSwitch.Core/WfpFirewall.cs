@@ -37,6 +37,7 @@ public sealed class WfpFirewall : IKsFirewall
     private static readonly Guid ConditionRemoteAddress = new("b235ae9a-1d64-49b8-a44c-5ff3d9095045");
     private static readonly Guid ConditionLocalAddress = new("d9ee00de-c1ef-4617-bfe3-ffd8f5a08957");
     private static readonly Guid ConditionRemotePort = new("c35a604d-d22b-4e1a-91b4-68f674ee674b");
+    private static readonly Guid ConditionLocalPort = new("0c1ba1af-5765-453f-af22-a8f791ac775b");
     private static readonly Guid ConditionProtocol = new("3971ef2b-623e-4f9a-8cb1-6e79b806b9a7");
 
     private const uint RpcCAuthnWinNt = 10;
@@ -251,6 +252,9 @@ public sealed class WfpFirewall : IKsFirewall
                     break;
                 case KsRemotePort port:
                     conditions.Add(Condition(ConditionRemotePort, MatchEqual, TypeUInt16, (IntPtr)port.Port));
+                    break;
+                case KsLocalPort port:
+                    conditions.Add(Condition(ConditionLocalPort, MatchEqual, TypeUInt16, (IntPtr)port.Port));
                     break;
                 case KsProtocolCondition protocol:
                     conditions.Add(Condition(ConditionProtocol, MatchEqual, TypeUInt8, (IntPtr)protocol.Protocol));

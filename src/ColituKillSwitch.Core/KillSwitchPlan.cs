@@ -25,6 +25,8 @@ public sealed record KsRemoteNetwork(KsNetwork Network) : KsCondition;
 
 public sealed record KsRemotePort(ushort Port) : KsCondition;
 
+public sealed record KsLocalPort(ushort Port) : KsCondition;
+
 public sealed record KsProtocolCondition(byte Protocol) : KsCondition;
 
 public sealed record KsFilter(KsLayer Layer, byte Weight, bool Permit, string Name, IReadOnlyList<KsCondition> Conditions)
@@ -151,7 +153,8 @@ public static class KsPlanBuilder
                     LocalNetworks.Where(net => net.IsV6 == v6 && IsLinkLocalOrMulticast(net)).Select(net => (KsCondition)new KsRemoteNetwork(net)).ToList()));
             }
 
-            filters.Add(new(layer, 11, true, "Permit DHCP", [new KsProtocolCondition(Udp), new KsRemotePort((ushort)(v6 ? 547 : 67))]));
+            // Client port too: a remote port alone lets any program reach any host on UDP 67/547 outside the tunnel.
+            filters.Add(new(layer, 11, true, "Permit DHCP", [new KsProtocolCondition(Udp), new KsLocalPort((ushort)(v6 ? 546 : 68)), new KsRemotePort((ushort)(v6 ? 547 : 67))]));
 
             if (arm.SplitMode == KsSplitMode.Bypass)
             {

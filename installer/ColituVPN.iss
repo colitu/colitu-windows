@@ -112,6 +112,61 @@ Type: filesandordirs; Name: "{commonappdata}\Colitu VPN\KillSwitch"
 Type: dirifempty; Name: "{commonappdata}\Colitu VPN"
 
 [Code]
+function IsDirEmpty(const Dir: String): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := True;
+  if FindFirst(AddBackslash(Dir) + '*', FindRec) then
+  try
+    repeat
+      if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+      begin
+        Result := False;
+        Break;
+      end;
+    until not FindNext(FindRec);
+  finally
+    FindClose(FindRec);
+  end;
+end;
+
+function RunIcacls(const Params: String): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Result := Exec(ExpandConstant('{sys}\icacls.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+// The app and its cores run elevated (and at sign-in without a UAC prompt) and the kill-switch
+// service runs as LocalSystem, so ordinary users must not be able to change them. Program Files
+// already ensures that; a folder picked elsewhere (C:\Colitu VPN, D:\Apps) inherits "Authenticated
+// Users: Modify", and a standard user may have created it beforehand and still own it (WRITE_DAC).
+// So the folder is locked down before any file is copied into it, its owner and every child's
+// ACL included, and the install stops if that fails.
+function LockDownAppDir(): String;
+var
+  Dir: String;
+begin
+  Result := '';
+  Dir := ExpandConstant('{app}');
+  // Never take over a folder holding someone else's files (a drive root, a profile folder).
+  if DirExists(Dir) and not FileExists(AddBackslash(Dir) + '{#MyAppExeName}') and not IsDirEmpty(Dir) then
+  begin
+    Result := 'The folder "' + Dir + '" already contains other files. Choose an empty folder for {#MyAppName}.';
+    Exit;
+  end;
+  if not ForceDirectories(Dir) then
+  begin
+    Result := 'Could not create the folder "' + Dir + '".';
+    Exit;
+  end;
+  if not RunIcacls('"' + Dir + '" /setowner *S-1-5-32-544 /T /C /Q')
+    or not RunIcacls('"' + Dir + '" /reset /T /C /Q')
+    or not RunIcacls('"' + Dir + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /Q') then
+    Result := 'Could not restrict access to the folder "' + Dir + '" to administrators.';
+end;
+
 // Runs once the user clicked Install (not when the wizard opens): cancelling the wizard
 // leaves a running connection alone.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -122,7 +177,7 @@ begin
   // Upgrade: stop the kill-switch service so its file can be replaced. Its firewall filters stay
   // in place while it is stopped (an armed switch keeps protecting during the update).
   Exec(ExpandConstant('{sys}\net.exe'), 'stop {#KsServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Result := '';
+  Result := LockDownAppDir();
 end;
 
 // Creates the service on a new install, points an existing one at this folder on an upgrade,
@@ -146,18 +201,12 @@ begin
   Exec(ExpandConstant('{sys}\sc.exe'), 'start {#KsServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-// The app and its cores run elevated (and at sign-in without a UAC prompt), so ordinary
-// users must not be able to change them. Program Files already ensures that; a folder
-// picked elsewhere (C:\Colitu VPN, D:\Apps) would inherit "Authenticated Users: Modify".
 procedure CurStepChanged(CurStep: TSetupStep);
-var
-  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
-    Exec(ExpandConstant('{sys}\icacls.exe'),
-      '"' + ExpandConstant('{app}') + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // Again after the copy (files inherit the folder's ACL; this keeps the old behaviour as a backstop).
+    RunIcacls('"' + ExpandConstant('{app}') + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX');
     // After the folder is locked down: the service runs as LocalSystem from here.
     InstallKillSwitchService();
   end;
