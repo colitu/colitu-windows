@@ -41,6 +41,13 @@ public class ColituRuDirectConfigTests
                     },
                     new()
                     {
+                        Enabled = true,
+                        RuleType = ERuleType.Routing,
+                        OutboundTag = Global.DirectTag,
+                        Ip = ["geoip:private"],
+                    },
+                    new()
+                    {
                         Enabled = ruDirect,
                         RuleType = ERuleType.Routing,
                         OutboundTag = Global.DirectTag,
@@ -132,5 +139,26 @@ public class ColituRuDirectConfigTests
         resolve.Should().BeGreaterThanOrEqualTo(0, "a domain must be resolved before the Russian IP rule can match");
         rules.FindIndex(resolve + 1, r => r.rule_set != null && r.rule_set.Contains("geoip-ru") && r.outbound == Global.DirectTag)
             .Should().BeGreaterThan(resolve);
+    }
+
+    /// <summary>
+    /// The local network goes out directly (colitu-lan-direct): in TUN mode 2.8.0 sent it to the
+    /// server, so another PC, a printer or a NAS on the LAN could not be reached. DNS (port 53)
+    /// is decided first, so a resolver on the LAN still gets no names.
+    /// </summary>
+    [Fact]
+    public void BothCores_SendTheLocalNetworkDirectAfterTheDnsRule()
+    {
+        var singbox = new CoreConfigSingboxService(RuDirectContext(ECoreType.sing_box)).GenerateClientConfigContent();
+        singbox.Success.Should().BeTrue($"ret msg: {singbox.Msg}");
+        var rules = JsonUtils.Deserialize<SingboxConfig>(singbox.Data!.ToString()!)!.route.rules;
+        var lan = rules.FindIndex(r => r.ip_is_private == true && r.outbound == Global.DirectTag);
+        lan.Should().BeGreaterThanOrEqualTo(0);
+        rules.FindIndex(r => r.port != null && r.port.Contains(53) && r.outbound == Global.ProxyTag).Should().BeLessThan(lan);
+
+        var xray = new CoreConfigV2rayService(RuDirectContext(ECoreType.Xray)).GenerateClientConfigContent();
+        xray.Success.Should().BeTrue($"ret msg: {xray.Msg}");
+        JsonUtils.Deserialize<V2rayConfig>(xray.Data!.ToString()!)!.routing.rules
+            .Should().Contain(r => r.ip != null && r.ip.Contains("geoip:private") && r.outboundTag == Global.DirectTag);
     }
 }

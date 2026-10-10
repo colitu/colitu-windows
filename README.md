@@ -15,7 +15,7 @@ system proxy, TUN adapter, routing and DNS.
 | | |
 |---|---|
 | App | `Colitu VPN` (`ColituVPN.exe`), WPF on .NET 10 |
-| Version | `2.8.0` (`src/Directory.Build.props`) |
+| Version | `2.8.1` (`src/Directory.Build.props`) |
 | OS | Windows 10 / 11, x64 |
 | Languages | Russian, English, Turkish |
 | Website | <https://colitu.com> · [downloads](https://colitu.com/downloads/windows) |
@@ -111,7 +111,7 @@ from the official releases and check their hashes:
 Then run:
 
 ```powershell
-pwsh .\scripts\build-installer.ps1 -Version 2.8.0
+pwsh .\scripts\build-installer.ps1 -Version 2.8.1
 ```
 
 The output in `artifacts/installer/` is `ColituVPN-Setup-<version>-x64.exe`, a

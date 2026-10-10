@@ -67,8 +67,9 @@ public class ColituRuDirectTests
 
         rules.Single(r => r.Id == "colitu-ru-direct-domain").Enabled.Should().BeFalse();
         rules.Single(r => r.Id == "colitu-ru-direct-ip").Enabled.Should().BeFalse();
-        // Nothing else may leave outside the tunnel either.
-        rules.Where(r => r.Enabled && r.OutboundTag == Global.DirectTag).Should().BeEmpty();
+        // Nothing else on the internet may leave outside the tunnel either; only the local network,
+        // which the server cannot reach.
+        rules.Where(r => r.Enabled && r.OutboundTag == Global.DirectTag).Select(r => r.Id).Should().Equal(ColituVpnService.LanDirectRuleId);
     }
 
     [Theory]
@@ -113,5 +114,21 @@ public class ColituRuDirectTests
         var dir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "srss-dosyalari");
         File.Exists(Path.Combine(dir, "geosite-category-ru.srs")).Should().BeTrue();
         File.Exists(Path.Combine(dir, "geoip-ru.srs")).Should().BeTrue();
+    }
+
+    [Fact]
+    public void LocalNetwork_GoesDirectAfterDnsUnlessTheKillSwitchBlocksIt()
+    {
+        var rules = ColituVpnService.BuildColituRoutingRules(new ColituVpnPreferences(PrivacyModeEnabled: true), "DE", tun: true);
+        var lan = rules.Single(r => r.Id == ColituVpnService.LanDirectRuleId);
+        lan.Enabled.Should().BeTrue();
+        lan.OutboundTag.Should().Be(Global.DirectTag);
+        lan.Ip.Should().Equal("geoip:private");
+        rules.FindIndex(r => r.Id == "colitu-dns-protection").Should().BeLessThan(rules.IndexOf(lan));
+
+        ColituVpnService.BuildColituRoutingRules(new ColituVpnPreferences(KillSwitchEnabled: false, KillSwitchAllowLan: false))
+            .Single(r => r.Id == ColituVpnService.LanDirectRuleId).Enabled.Should().BeTrue();
+        ColituVpnService.BuildColituRoutingRules(new ColituVpnPreferences(KillSwitchEnabled: true, KillSwitchAllowLan: false))
+            .Single(r => r.Id == ColituVpnService.LanDirectRuleId).Enabled.Should().BeFalse();
     }
 }
