@@ -362,6 +362,18 @@ public static class ColituWarmSpare
             return ["not an Xray config"];
         }
         var tags = outbounds.OfType<JsonObject>().Select(Tag).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        // The stats API's rule (inbound api -> outboundTag api) points at the API, not an outbound.
+        if (Str(root["api"]?["tag"]) is { } apiTag)
+        {
+            tags.Add(apiTag);
+        }
+        // A rule only for inbounds the config does not have never matches (v2rayN keeps its stats
+        // rule "api -> api" with the API off): 2.8.0-2.8.2 refused every Xray spare over it.
+        var sources = (root["inbounds"] as JsonArray)?.OfType<JsonObject>().Select(Tag).OfType<string>().ToHashSet(StringComparer.Ordinal) ?? [];
+        if (Str(root["dns"]?["tag"]) is { } dnsSource)
+        {
+            sources.Add(dnsSource);
+        }
         var balancers = (root["routing"]?["balancers"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
         var balancerTags = balancers.Select(Tag).OfType<string>().ToHashSet(StringComparer.Ordinal);
         foreach (var balancer in balancers)
@@ -388,6 +400,10 @@ public static class ColituWarmSpare
         var rules = (root["routing"]?["rules"] as JsonArray)?.OfType<JsonObject>().ToList() ?? [];
         foreach (var (rule, index) in rules.Select((rule, index) => (rule, index)))
         {
+            if (rule["inboundTag"] is JsonArray && Strings(rule["inboundTag"]).All(source => !sources.Contains(source)))
+            {
+                continue;
+            }
             var outbound = Str(rule["outboundTag"]);
             var balancer = Str(rule["balancerTag"]);
             if (outbound == null && balancer == null)

@@ -1259,6 +1259,14 @@ public sealed class ColituVpnService
         try
         {
             await RecoverKillSwitchAsync();
+            if (KillSwitchEngaged)
+            {
+                // Held from the last run: the system resolver is blocked, so the first panel call
+                // at start-up failed ("no such host") and the app said the server was unreachable
+                // until the connect pinned the addresses. Pin them now (DoH from this app is allowed).
+                using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+                await ColituPinnedHosts.RefreshAsync(PinnedAppHosts(), budget.Token);
+            }
         }
         catch (Exception ex)
         {
@@ -3229,6 +3237,11 @@ public sealed class ColituVpnService
         // tunnel, and sing-box's strict route would add a second, conflicting set of rules. Without
         // it, strict route is what keeps Windows from also asking the network adapter's DNS server.
         _config.TunModeItem.StrictRoute = tun && !preferences.KillSwitchEnabled;
+        // sing-box runs the TUN adapter for every transport and hands Xray's connections to Xray
+        // (as on Linux). Xray's own TUN sets no DNS server on its adapter, so Windows kept asking
+        // the network adapter's resolver: the internet provider saw every name without the kill
+        // switch, and with it (port 53 blocked outside the tunnel) names did not resolve at all.
+        _config.TunModeItem.EnableLegacyProtect = true;
 
         if (_config.Inbound.Count > 0)
         {

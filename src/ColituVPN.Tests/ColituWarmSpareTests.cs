@@ -235,6 +235,29 @@ public class ColituWarmSpareTests
         ColituWarmSpare.AddCheckInbound("not json", true, Check).Should().BeNull();
     }
 
+    /// <summary>
+    /// Xray's stats API adds a rule inboundTag api -> outboundTag api: the API, not an outbound.
+    /// 2.8.0-2.8.2 counted it as a missing outbound and never attached a spare to an Xray tunnel.
+    /// </summary>
+    [Fact]
+    public void Xray_StatsApiRule_IsNotAMissingOutbound()
+    {
+        // As v2rayN writes it with the API off: the rule stays, the api section and inbound do not.
+        var withRule = JsonNode.Parse(XrayConfig)!.AsObject();
+        withRule["routing"]!["rules"]!.AsArray().Insert(0, new JsonObject { ["type"] = "field", ["inboundTag"] = new JsonArray("api"), ["outboundTag"] = "api" });
+        ColituWarmSpare.XrayProblems(ColituWarmSpare.ApplyXray(withRule.ToJsonString(), XraySpare(), verify: Verify)!).Should().BeEmpty();
+
+        // With the API on.
+        var withApi = (JsonObject)withRule.DeepClone();
+        withApi["api"] = new JsonObject { ["tag"] = "api", ["services"] = new JsonArray("StatsService") };
+        ColituWarmSpare.XrayProblems(ColituWarmSpare.ApplyXray(withApi.ToJsonString(), XraySpare(), verify: Verify)!).Should().BeEmpty();
+
+        // A rule that can match still needs its outbound.
+        var broken = JsonNode.Parse(ColituWarmSpare.ApplyXray(XrayConfig, XraySpare(), verify: Verify)!)!.AsObject();
+        broken["routing"]!["rules"]!.AsArray().Add(new JsonObject { ["type"] = "field", ["port"] = "443", ["outboundTag"] = "gone" });
+        ColituWarmSpare.XrayProblems(broken.ToJsonString()).Should().Contain(problem => problem.Contains("gone"));
+    }
+
     [Fact]
     public void VerifyInbound_HasAFreeLoopbackPortAndRandomCredentials()
     {
