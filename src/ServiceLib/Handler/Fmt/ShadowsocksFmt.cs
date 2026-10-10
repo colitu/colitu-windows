@@ -104,7 +104,8 @@ public class ShadowsocksFmt : BaseFmt
     }
 
     private static readonly Regex UrlFinder = new(@"ss://(?<base64>[A-Za-z0-9+-/=_]+)(?:#(?<tag>\S+))?", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex DetailsParser = new(@"^((?<method>.+?):(?<password>.*)@(?<hostname>.+?):(?<port>\d+?))$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    // The lazy groups backtrack over every ':' and '@' (cubic time on a long password): bounded.
+    private static readonly Regex DetailsParser = new(@"^((?<method>.+?):(?<password>.*)@(?<hostname>.+?):(?<port>\d+?))$", RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(250));
 
     private static ProfileItem? ResolveSSLegacy(string result)
     {
@@ -126,7 +127,7 @@ public class ShadowsocksFmt : BaseFmt
         {
             details = DetailsParser.Match(Utils.Base64Decode(base64));
         }
-        catch (FormatException)
+        catch (Exception ex) when (ex is FormatException or RegexMatchTimeoutException)
         {
             return null;
         }

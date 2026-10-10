@@ -2864,6 +2864,8 @@ public sealed class ColituVpnService
     /// Imports every transport offered by the panel for the selected location
     /// (primary first) and returns the matching v2rayN profiles in that order.
     /// </summary>
+    private static readonly string[] ImportSchemes = ["vless://", "trojan://", "hysteria2://", "ss://"];
+
     private async Task<List<(ColituConfigCandidate Candidate, ProfileItem Profile)>> ImportConfigAsync(ColituVpnConfigResponse config, ColituVpnServer? server)
     {
         var candidates = config.Candidates;
@@ -2873,6 +2875,13 @@ public sealed class ColituVpnService
             throw new InvalidOperationException("Server config is not ready.");
         }
 
+        // RawConfig is built locally from share links. Anything else must never reach v2rayN's
+        // importer, whose fallbacks register unrecognised text as a full core config.
+        if (config.RawConfig.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0)
+            .Any(line => !ImportSchemes.Any(scheme => line.StartsWith(scheme, StringComparison.OrdinalIgnoreCase))))
+        {
+            throw new InvalidOperationException("Server config could not be imported.");
+        }
         var imported = await ConfigHandler.AddBatchServers(_config, config.RawConfig, ColituSubId, true);
         if (imported <= 0) throw new InvalidOperationException("Server config could not be imported.");
 

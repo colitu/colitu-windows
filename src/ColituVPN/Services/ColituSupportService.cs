@@ -1,5 +1,7 @@
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -61,10 +63,13 @@ public sealed partial class ColituSupportService
     }
 
     /// <summary>
-    /// Where opened attachments go. It is in the user's temp folder because the user's own
-    /// (non-elevated) Explorer must be able to open them; see <see cref="DownloadAsync"/>.
+    /// Where opened attachments go: under the app's admin-only guiTemps, never the user's
+    /// %TEMP%. Non-elevated processes of the same user can change %TEMP%, and the elevated
+    /// app creating, writing and recursively deleting there could be redirected with a
+    /// junction to any folder. Each download folder also lets the signed-in user read, so
+    /// their own (non-elevated) Explorer can still open the file; see <see cref="DownloadAsync"/>.
     /// </summary>
-    internal static string DownloadRoot => Path.Combine(Path.GetTempPath(), "ColituSupport");
+    internal static string DownloadRoot => Path.Combine(Utils.GetTempPath(), "support");
 
     /// <summary>Downloads an attachment into the temp folder and returns its path.</summary>
     public async Task<string> DownloadAsync(ColituSupportAttachment attachment)
@@ -78,8 +83,7 @@ public sealed partial class ColituSupportService
         try
         {
             await using var source = await response.Content.ReadAsStreamAsync();
-            // CreateNew in a folder with a random name: an elevated write never follows or
-            // overwrites something prepared in the user-writable temp folder.
+            // CreateNew in a new folder with a random name: never overwrites anything.
             await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             // The server's size header is not trusted: stop writing past the limit.
             var buffer = new byte[81920];
@@ -93,6 +97,17 @@ public sealed partial class ColituSupportService
                     throw new InvalidOperationException("Attachment is too large.");
                 }
                 await file.WriteAsync(buffer.AsMemory(0, read));
+            }
+            await file.DisposeAsync();
+            // Mark of the Web: SmartScreen and Office Protected View treat the file (and what is
+            // extracted from a .zip) as downloaded from the internet.
+            try
+            {
+                await File.WriteAllTextAsync(path + ":Zone.Identifier", "[ZoneTransfer]\r\nZoneId=3\r\n");
+            }
+            catch (IOException)
+            {
+                // A file system without alternate data streams (FAT): the file still opens.
             }
         }
         catch
@@ -125,15 +140,28 @@ public sealed partial class ColituSupportService
     private static string CreateDownloadFolder()
     {
         var root = DownloadRoot;
-        if (Directory.Exists(root) && new DirectoryInfo(root).Attributes.HasFlag(FileAttributes.ReparsePoint))
-        {
-            // A junction someone put there: remove the link (not its target) and start over.
-            Directory.Delete(root);
-        }
+        // guiTemps is administrators and SYSTEM only (ColituHardening), so is this folder.
         Directory.CreateDirectory(root);
-        var folder = Path.Combine(root, Guid.NewGuid().ToString("N")[..12]);
-        Directory.CreateDirectory(folder);
-        return folder;
+        var folder = new DirectoryInfo(Path.Combine(root, Guid.NewGuid().ToString("N")[..12]));
+        folder.Create(DownloadFolderSecurity());
+        return folder.FullName;
+    }
+
+    /// <summary>Administrators and SYSTEM, plus read for the signed-in user (not for other users of the PC).</summary>
+    private static DirectorySecurity DownloadFolderSecurity()
+    {
+        var security = new DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        const InheritanceFlags inherit = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+        foreach (var sid in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid })
+        {
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null), FileSystemRights.FullControl, inherit, PropagationFlags.None, AccessControlType.Allow));
+        }
+        if (WindowsIdentity.GetCurrent().User is { } user)
+        {
+            security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.ReadAndExecute, inherit, PropagationFlags.None, AccessControlType.Allow));
+        }
+        return security;
     }
 
     /// <summary>Removes downloaded attachments (on sign-out: they belong to the account).</summary>
@@ -141,13 +169,11 @@ public sealed partial class ColituSupportService
     {
         try
         {
+            // Only the admin-only folder is deleted recursively. The %TEMP%\ColituSupport folder of
+            // earlier versions is left alone: a recursive delete there by the elevated app could be
+            // redirected by any process of the user.
             var root = DownloadRoot;
             if (!Directory.Exists(root)) return;
-            if (new DirectoryInfo(root).Attributes.HasFlag(FileAttributes.ReparsePoint))
-            {
-                Directory.Delete(root);
-                return;
-            }
             Directory.Delete(root, recursive: true);
         }
         catch
