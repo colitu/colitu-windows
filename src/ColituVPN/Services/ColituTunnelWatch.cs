@@ -48,23 +48,6 @@ public sealed class ColituTunnelWatch
         SpareDeadUnreplaced = false;
     }
 
-    /// <summary>
-    /// The verdict <paramref name="action"/> could not be acted on yet (inside the minimum gap between
-    /// automatic switches, nothing else to switch to, ...): keep the miss count one short of the
-    /// threshold, so the very next miss gives the same verdict and the switch happens as soon as it
-    /// is allowed. Call it only when the switch did NOT happen; a switch (or a network change) resets.
-    /// </summary>
-    public void Defer(ColituWatchAction action)
-    {
-        switch (action)
-        {
-            case ColituWatchAction.PrimaryDead:
-            case ColituWatchAction.Reconnect:
-                NormalMisses = Math.Max(NormalMisses, MissesForDead - 1);
-                break;
-        }
-    }
-
     /// <param name="primaryOk">The primary alone (verify path); null without a spare (the normal path is the primary then).</param>
     /// <param name="normalOk">The normal path (what the apps use).</param>
     /// <param name="online">The device reaches the internet outside the tunnel; only asked when a check failed.</param>
