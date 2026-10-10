@@ -105,9 +105,11 @@ if (-not $SkipPublish) {
         -p:FileVersion=$Version `
         -p:InformationalVersion=$Version `
         -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:EnableCompressionInSingleFile=true `
         -o $publishDir
+    # No IncludeNativeLibrariesForSelfExtract: the native DLLs (WPF, SQLite) stay next to the exe in
+    # the admin-only install folder. Embedded, they are extracted to the user's %TEMP%\.net at start,
+    # where the user's non-elevated programs could replace them before the elevated app loads them.
 }
 
 if (-not $SkipPublish) {

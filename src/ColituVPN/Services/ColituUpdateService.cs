@@ -206,6 +206,9 @@ public sealed class ColituUpdateService
             )
 
             $ErrorActionPreference = "Continue"
+            # The helper runs elevated: the built-in modules by full path, before any cmdlet could be
+            # auto-loaded from a module folder the user's own (non-elevated) programs can write to.
+            Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Management", "$PSHOME\Modules\Microsoft.PowerShell.Utility" -ErrorAction Stop
             $appProcessName = [System.IO.Path]::GetFileNameWithoutExtension($Target)
 
             function Write-UpdateLog([string]$Message) {
@@ -355,6 +358,8 @@ public sealed class ColituUpdateService
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden
         };
+        // PSModulePath is inherited from HKCU\Environment, which any process of the user can set.
+        startInfo.Environment["PSModulePath"] = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "Modules");
         startInfo.ArgumentList.Add("-NoProfile");
         startInfo.ArgumentList.Add("-NoLogo");
         // Default client machines ship with a Restricted execution policy that silently

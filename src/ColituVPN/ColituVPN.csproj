@@ -11,6 +11,9 @@
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 		<SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<!-- The app runs elevated (also at sign-in): DOTNET_STARTUP_HOOKS, settable by any process of the
+		     user in HKCU\Environment, must not load an assembly into it. -->
+		<StartupHookSupport>false</StartupHookSupport>
 	</PropertyGroup>
 
 
