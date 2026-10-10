@@ -183,6 +183,10 @@ $versionCode = ($versionParts[0] * 100) + ($versionParts[1] * 10) + $versionPart
 $downloadUrl = "https://colitu.com/downloads/windows/ColituVPN-Setup-$Version-x64.exe"
 $sha256 = $hash.Hash.ToLowerInvariant()
 $forceUpdate = $false
+# Freshness: the app refuses a manifest older than 30 days or past expires_at (a replayed old manifest cannot hold back updates).
+$issuedAt = [DateTime]::UtcNow
+$issuedAtText = $issuedAt.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+$expiresAtText = $issuedAt.AddDays(30).ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
 
 # Same text as ColituUpdateSignature.Message in the app; any change there must be mirrored here.
 $signedText = @(
@@ -193,10 +197,14 @@ $signedText = @(
     $sha256,
     $(if ($forceUpdate) { "true" } else { "false" })
 ) -join "`n"
+# signature_v2 covers the legacy text plus issued_at and expires_at (ColituUpdateSignature.MessageV2).
+$signedTextV2 = @($signedText, $issuedAtText, $expiresAtText) -join "`n"
 $signingKey = [System.Security.Cryptography.ECDsa]::Create()
 try {
     $signingKey.ImportFromPem((Get-Content -LiteralPath $SigningKeyPath -Raw))
+    # `signature` stays the dateless legacy format: clients up to 2.8.4 verify exactly this.
     $signature = [Convert]::ToBase64String($signingKey.SignData([System.Text.Encoding]::UTF8.GetBytes($signedText), [System.Security.Cryptography.HashAlgorithmName]::SHA256))
+    $signatureV2 = [Convert]::ToBase64String($signingKey.SignData([System.Text.Encoding]::UTF8.GetBytes($signedTextV2), [System.Security.Cryptography.HashAlgorithmName]::SHA256))
 }
 finally {
     $signingKey.Dispose()
@@ -209,7 +217,10 @@ $manifest = [ordered]@{
     sha256 = $sha256
     forceUpdate = $forceUpdate
     releaseNotes = ""
+    issued_at = $issuedAtText
+    expires_at = $expiresAtText
     signature = $signature
+    signature_v2 = $signatureV2
 }
 # Check the signature against the public key built into the app: a manifest signed with the
 # wrong key would be ignored by every installed copy without any error.
@@ -218,7 +229,8 @@ $publicKeyPem = [regex]::Match($appSource, '-----BEGIN PUBLIC KEY-----[\s\S]+?--
 $verifyKey = [System.Security.Cryptography.ECDsa]::Create()
 try {
     $verifyKey.ImportFromPem($publicKeyPem)
-    if (-not $verifyKey.VerifyData([System.Text.Encoding]::UTF8.GetBytes($signedText), [Convert]::FromBase64String($signature), [System.Security.Cryptography.HashAlgorithmName]::SHA256)) {
+    if (-not $verifyKey.VerifyData([System.Text.Encoding]::UTF8.GetBytes($signedText), [Convert]::FromBase64String($signature), [System.Security.Cryptography.HashAlgorithmName]::SHA256) `
+        -or -not $verifyKey.VerifyData([System.Text.Encoding]::UTF8.GetBytes($signedTextV2), [Convert]::FromBase64String($signatureV2), [System.Security.Cryptography.HashAlgorithmName]::SHA256)) {
         throw "latest.json does not verify against the app's public key: wrong signing key ($SigningKeyPath)."
     }
 }

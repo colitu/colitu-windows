@@ -15,6 +15,9 @@ public enum ColituWatchAction
     Reconnect
 }
 
+/// <summary>See <see cref="ColituSpareHealth.SwapDeferral"/>.</summary>
+public readonly record struct SwapDecision(bool Now, string Reason, string Key);
+
 /// <summary>
 /// Adaptive Connect 2.0 mid-session watcher (every transport, not only Hysteria2). Every 5 s for
 /// the first 90 s after the connect, then every 30 s. With a warm spare each round checks the
@@ -46,6 +49,23 @@ public sealed class ColituTunnelWatch
         NormalMisses = 0;
         PrimaryDeclaredDead = false;
         SpareDeadUnreplaced = false;
+    }
+
+    /// <summary>
+    /// The verdict <paramref name="action"/> could not be acted on yet (inside the minimum gap between
+    /// automatic switches, nothing else to switch to, ...): keep the miss count one short of the
+    /// threshold, so the very next miss gives the same verdict and the switch happens as soon as it
+    /// is allowed. Call it only when the switch did NOT happen; a switch (or a network change) resets.
+    /// </summary>
+    public void Defer(ColituWatchAction action)
+    {
+        switch (action)
+        {
+            case ColituWatchAction.PrimaryDead:
+            case ColituWatchAction.Reconnect:
+                NormalMisses = Math.Max(NormalMisses, MissesForDead - 1);
+                break;
+        }
     }
 
     /// <param name="primaryOk">The primary alone (verify path); null without a spare (the normal path is the primary then).</param>
@@ -154,6 +174,33 @@ public sealed class ColituSpareHealth
 
     /// <summary>A core reload may happen now: the tunnel carried less than 10 KB in the last 10 s (unknown, -1, counts as quiet).</summary>
     public static bool CanSwap(long bytesLastWindow) => bytesLastWindow < QuietBytes;
+
+    /// <summary>Under this many bytes in 10 s the tunnel is idle: the swap goes ahead at once.</summary>
+    public const long SwapIdleBytes = QuietBytes;
+    /// <summary>A swap is held back at most this long; after that a light load (under <see cref="SwapLightBytes"/>) no longer blocks it.</summary>
+    public static readonly TimeSpan SwapMaxDefer = TimeSpan.FromMinutes(2);
+    /// <summary>"Light" traffic in 10 s (a page load, a chat): a core reload is tolerable once <see cref="SwapMaxDefer"/> has passed.</summary>
+    public const long SwapLightBytes = 32 * 1024;
+
+    /// <summary>The spare swap decision: <see cref="SwapDecision.Now"/>, why, and a stable key (log only when it changes).</summary>
+    /// <param name="bytesLast10s">Bytes over the physical adapter in the last 10 s; null when unknown.</param>
+    /// <param name="deferredFor">How long this swap has been held back already.</param>
+    public static SwapDecision SwapDeferral(long? bytesLast10s, TimeSpan deferredFor)
+    {
+        if (bytesLast10s is not { } bytes)
+        {
+            return new SwapDecision(true, "traffic unknown", "unknown");
+        }
+        if (bytes < SwapIdleBytes)
+        {
+            return new SwapDecision(true, "idle", "idle");
+        }
+        if (deferredFor >= SwapMaxDefer && bytes < SwapLightBytes)
+        {
+            return new SwapDecision(true, $"light traffic ({bytes / 1024} KB in the last 10 s) after {(int)deferredFor.TotalSeconds} s of deferral", "light");
+        }
+        return new SwapDecision(false, $"busy ({bytes / 1024} KB in the last 10 s)", "busy");
+    }
 }
 
 /// <summary>Outcome of one parallel round (primary and spare checked at the same time).</summary>

@@ -336,6 +336,15 @@ public partial class CoreConfigSingboxService
 
         foreach (var item in rules)
         {
+            // Programs that are sent to the proxy (Colitu "only selected apps") resolve their names
+            // through the proxy too: without this their lookups fall to the direct resolver (the final
+            // one when everything else goes direct) and leave the tunnel in clear text.
+            if (item.Enabled && item.RuleType != ERuleType.Routing && item.OutboundTag == Global.ProxyTag
+                && item.Process is { Count: > 0 })
+            {
+                AddProcessDnsRules(item.Process, simpleDnsItem);
+            }
+
             if (!item.Enabled || item.Domain is null || item.Domain.Count == 0)
             {
                 continue;
@@ -402,6 +411,39 @@ public partial class CoreConfigSingboxService
             }
 
             _coreConfig.dns.rules.Add(rule);
+        }
+    }
+
+    /// <summary>DNS rules sending the lookups of the given programs (full path or file name) to the remote resolver.</summary>
+    private void AddProcessDnsRules(IEnumerable<string> processes, SimpleDNSItem simpleDnsItem)
+    {
+        var names = new List<string>();
+        var paths = new List<string>();
+        foreach (var process in processes)
+        {
+            if (string.IsNullOrWhiteSpace(process) || process is "self/" or "xray/")
+            {
+                continue;
+            }
+            if (process.Contains('/') || process.Contains('\\'))
+            {
+                paths.Add(Utils.IsWindows() ? process.Replace('/', '\\') : process);
+            }
+            else
+            {
+                // sing-box strictly matches the exe suffix on Windows
+                names.Add(Utils.GetExeName(process));
+            }
+        }
+
+        var strategy = Utils.DomainStrategy4Sbox(simpleDnsItem.Strategy4Proxy);
+        if (names.Count > 0)
+        {
+            _coreConfig.dns!.rules.Add(new() { server = Global.SingboxRemoteDNSTag, strategy = strategy, process_name = names });
+        }
+        if (paths.Count > 0)
+        {
+            _coreConfig.dns!.rules.Add(new() { server = Global.SingboxRemoteDNSTag, strategy = strategy, process_path = paths });
         }
     }
 

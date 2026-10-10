@@ -359,7 +359,7 @@ public sealed class ColituAuthService
         };
     }
 
-    private static HttpClient CreateHttpClient(TimeSpan timeout) => new(new SocketsHttpHandler
+    private static HttpClient CreateHttpClient(TimeSpan timeout) => new(ColituCertPins.Pin(new SocketsHttpHandler
     {
         UseProxy = false,
         // The API never redirects; a redirect would resend a password or refresh token
@@ -369,7 +369,7 @@ public sealed class ColituAuthService
         PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
         // The kill switch blocks the system DNS lookup: dial the API's pinned addresses.
         ConnectCallback = ColituPinnedHosts.ConnectAsync
-    })
+    }))
     {
         Timeout = timeout,
         // Responses are read into memory: a broken or hostile answer can't grow without bound.
@@ -1029,6 +1029,7 @@ public sealed class ColituAuthService
         }
         // Cached connection settings carry this account's server credentials.
         ColituVpnService.DeleteConfigCache();
+        ColituVpnService.DeleteRecoverySet();
         ColituSupportService.DeleteDownloads();
     }
 

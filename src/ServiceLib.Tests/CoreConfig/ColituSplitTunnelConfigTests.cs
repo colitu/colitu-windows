@@ -112,6 +112,36 @@ public class ColituSplitTunnelConfigTests
         cfg.dns.rules.Should().Contain(r => r.domain_suffix != null && r.domain_suffix.Contains("bank.example") && r.server == Global.SingboxRemoteDNSTag);
     }
 
+    /// <summary>
+    /// Audit finding: with "only selected apps" the final resolver is the direct one, so lookups of
+    /// the selected programs left the tunnel (clear text to 1.1.1.1). They now have their own DNS
+    /// rules to the remote resolver (detour: proxy), ahead of everything that could catch them.
+    /// </summary>
+    [Fact]
+    public void SingBox_Tun_Only_SelectedAppsResolveThroughTheTunnel()
+    {
+        var cfg = SingBox(tun: true, only: true);
+
+        var remote = cfg.dns.servers.Single(s => s.tag == Global.SingboxRemoteDNSTag);
+        remote.detour.Should().Be(Global.ProxyTag);
+        cfg.dns.final.Should().Be(Global.SingboxDirectDNSTag);
+
+        var byPath = cfg.dns.rules.FindIndex(r => r.process_path != null && r.process_path.Contains(App) && r.server == Global.SingboxRemoteDNSTag);
+        var byName = cfg.dns.rules.FindIndex(r => r.process_name != null && r.process_name.Contains("game.exe") && r.server == Global.SingboxRemoteDNSTag);
+        byPath.Should().BeGreaterThanOrEqualTo(0);
+        byName.Should().BeGreaterThanOrEqualTo(0);
+        // No name/process-matching rule that answers from the direct resolver sits in front of them (clash_mode rules are inert here).
+        cfg.dns.rules.Take(Math.Min(byPath, byName)).Should().NotContain(r => r.server == Global.SingboxDirectDNSTag && string.IsNullOrEmpty(r.clash_mode));
+    }
+
+    [Fact]
+    public void SingBox_Tun_Bypass_AddsNoRemoteDnsRulesForTheApps()
+    {
+        var cfg = SingBox(tun: true, only: false);
+
+        cfg.dns.rules.Should().NotContain(r => (r.process_path != null || r.process_name != null) && r.server == Global.SingboxRemoteDNSTag);
+    }
+
     [Fact]
     public void SingBox_Proxy_HasNoProcessRules()
     {

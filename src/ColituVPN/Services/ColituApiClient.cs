@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -37,12 +38,8 @@ public sealed class ColituApiClient
             ClientCountry = response.ClientCountry?.Trim().ToUpperInvariant() is { Length: 2 } country ? country : null,
             ClientNetwork = response.ClientNetwork?.Trim() is { Length: > 0 and <= 64 } network ? network : null,
             NetworkToken = response.NetworkToken?.Trim() is { Length: > 0 and <= 512 } token ? token : null,
-            NetworkHintsBlocked = (response.NetworkHints?.Blocked ?? [])
-                .Where(protocol => !string.IsNullOrWhiteSpace(protocol))
-                .Select(protocol => protocol.Trim().ToLowerInvariant())
-                .Distinct()
-                .Take(8)
-                .ToList()
+            NetworkHintsBlocked = ColituNetworkHintsPolicy.ParseProtocols(response.NetworkHints?.Blocked),
+            NetworkHintsPreferred = ColituNetworkHintsPolicy.ParsePreferred(response.NetworkHints?.Preferred, response.NetworkHints?.Blocked)
         };
     }
 
@@ -119,13 +116,33 @@ public sealed class ColituApiClient
         var multihop = server is { IsMultihop: true, Id.Length: > 0 };
         var path = multihop ? ConfigPathForRoute(server!.Id!) : ConfigPath(node, exclude);
         var envelope = await ColituAuthService.Instance.GetAuthorizedJsonAsync<ColituConfigEnvelopeDto>(path, token);
+        return await BuildConfigAsync(envelope, server, multihop, ignoreGrace: false, token);
+    }
+
+    /// <summary>
+    /// A recovery-set envelope as connection settings, used like a cached config; its own
+    /// <c>offline_grace_until</c> is ignored (<c>recovery_until</c> replaces it).
+    /// </summary>
+    internal Task<ColituVpnConfigResponse?> GetRecoveryConfigAsync(ColituConfigEnvelopeDto envelope, CancellationToken token = default) =>
+        BuildConfigAsync(envelope, null, multihop: false, ignoreGrace: true, token);
+
+    /// <summary><c>GET /client/recovery</c>, the raw JSON (stored as it came; parsed by <see cref="ColituRecoverySet"/>).</summary>
+    public async Task<string> GetRecoveryJsonAsync(CancellationToken token = default)
+    {
+        using var response = await ColituAuthService.Instance.SendAuthorizedRequestAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, ColituAuthService.Instance.ApiUri("/client/recovery")));
+        return await response.Content.ReadAsStringAsync(token);
+    }
+
+    private async Task<ColituVpnConfigResponse?> BuildConfigAsync(ColituConfigEnvelopeDto? envelope, ColituVpnServer? server, bool multihop, bool ignoreGrace, CancellationToken token)
+    {
         if (envelope?.Profile == null)
         {
             return null;
         }
 
         var now = DateTimeOffset.UtcNow;
-        if (envelope.OfflineGraceUntil is { } grace && grace <= now)
+        if (!ignoreGrace && envelope.OfflineGraceUntil is { } grace && grace <= now)
         {
             throw new InvalidOperationException("Connection settings have expired. Please try again.");
         }
@@ -879,6 +896,8 @@ internal sealed class ColituServerListDto
 internal sealed class ColituNetworkHintsDto
 {
     [JsonPropertyName("blocked")] public List<string>? Blocked { get; set; }
+    /// <summary>Protocols that worked for most devices on this network, best first (Adaptive Connect 3.0).</summary>
+    [JsonPropertyName("preferred")] public List<string>? Preferred { get; set; }
     /// <summary>"network" (this ISP network) or "country" (too little data for the network).</summary>
     [JsonPropertyName("scope")] public string? Scope { get; set; }
     [JsonPropertyName("updated_at")] public string? UpdatedAt { get; set; }

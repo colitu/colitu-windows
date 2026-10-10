@@ -17,14 +17,16 @@ public class ColituSecurityTests
         VersionName = "2.4.1",
         DownloadUrl = "https://colitu.com/downloads/windows/ColituVPN-Setup-2.4.1-x64.exe",
         Sha256 = "ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-        ForceUpdate = false
+        ForceUpdate = false,
+        IssuedAt = "2026-10-10T12:00:00Z",
+        ExpiresAt = "2026-11-09T12:00:00Z"
     };
 
     private static (string PublicPem, ColituVersionPayload Payload) Signed()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var payload = Manifest();
-        payload.Signature = Convert.ToBase64String(key.SignData(Encoding.UTF8.GetBytes(ColituUpdateSignature.Message(payload)), HashAlgorithmName.SHA256));
+        payload.SignatureV2 = Convert.ToBase64String(key.SignData(Encoding.UTF8.GetBytes(ColituUpdateSignature.MessageV2(payload)), HashAlgorithmName.SHA256));
         return (key.ExportSubjectPublicKeyInfoPem(), payload);
     }
 

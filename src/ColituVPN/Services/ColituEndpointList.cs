@@ -430,13 +430,13 @@ public sealed class ColituEndpointList
 
     private async Task<string?> FetchAsync(string url, CancellationToken token)
     {
-        var http = _http ??= new HttpClient(new SocketsHttpHandler
+        var http = _http ??= new HttpClient(ColituCertPins.Pin(new SocketsHttpHandler
         {
             UseProxy = false,
             AllowAutoRedirect = false,
             ConnectTimeout = TimeSpan.FromSeconds(8),
             ConnectCallback = ColituPinnedHosts.ConnectAsync
-        })
+        }))
         {
             Timeout = FetchTimeout,
             MaxResponseContentBufferSize = MaxListBytes

@@ -55,10 +55,6 @@ public class CoreManager
             {
                 if (it.CoreType == ECoreType.v2rayN)
                 {
-                    if (Utils.UpgradeAppExists(out var upgradeFileName))
-                    {
-                        await Utils.SetLinuxChmod(upgradeFileName);
-                    }
                     continue;
                 }
 

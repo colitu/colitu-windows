@@ -566,6 +566,7 @@ public sealed class Loc : INotifyPropertyChanged
         ["split.err.app"] = ["Выберите файл программы (.exe).", "Bir uygulama dosyası (.exe) seçin.", "Choose a program file (.exe)."],
         ["split.err.limit"] = ["Список заполнен.", "Liste dolu.", "The list is full."],
         ["split.proxyNote"] = ["В режиме прокси программы разделить нельзя: прокси не различает программы. Работают сайты и IP-адреса; для программ включите режим «Весь трафик (TUN)».", "Proxy modunda uygulamalar ayrılamaz: proxy uygulamaları ayırt edemez. Siteler ve IP adresleri çalışır; uygulamalar için “Tüm trafik (TUN)” modunu açın.", "Apps can’t be split in proxy mode: a proxy can’t tell apps apart. Sites and IP addresses work; switch to “All traffic (TUN)” for apps."],
+        ["split.appsNote"] = ["Программы определяются по имени файла: другая программа с таким же именем (например, Update.exe) тоже будет учтена.", "Uygulamalar dosya adıyla eşleştirilir: aynı ada sahip başka bir program (ör. Update.exe) da bu listeye dahil olur.", "Apps are matched by file name: another program with the same name (for example Update.exe) is treated the same way."],
         ["split.empty"] = ["Пока ничего не добавлено.", "Henüz bir şey eklenmedi.", "Nothing added yet."],
         ["split.chip.bypass"] = ["Раздельное туннелирование: мимо VPN — {n}", "Bölünmüş tünel: VPN dışında {n}", "Split tunneling on: {n} outside VPN"],
         ["split.chip.only"] = ["Раздельное туннелирование: через VPN только {n}", "Bölünmüş tünel: yalnızca {n} VPN’de", "Split tunneling on: only {n} use VPN"],

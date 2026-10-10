@@ -141,13 +141,6 @@ public class BackupAndRestoreViewModel : MyReactiveObject
             {
                 ProcUtils.RebootAsAdmin(false);
             }
-            else
-            {
-                if (Utils.UpgradeAppExists(out var upgradeFileName))
-                {
-                    _ = ProcUtils.ProcessStart(upgradeFileName, Global.RebootAs, Utils.StartupPath());
-                }
-            }
             AppManager.Instance.Shutdown(true);
         }
         else

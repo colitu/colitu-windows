@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text;
 
 namespace v2rayN.Services;
@@ -31,10 +32,10 @@ public sealed class ColituUpdateService
     private static readonly string LocalVersionName = ColituAuthService.ClientVersion;
     private static readonly TimeSpan AttemptCooldown = TimeSpan.FromMinutes(30);
 
-    private readonly HttpClient _httpClient = new(new SocketsHttpHandler { UseProxy = false, ConnectCallback = ColituPinnedHosts.ConnectAsync }) { Timeout = TimeSpan.FromSeconds(30) };
+    private readonly HttpClient _httpClient = new(ColituCertPins.Pin(new SocketsHttpHandler { UseProxy = false, ConnectCallback = ColituPinnedHosts.ConnectAsync })) { Timeout = TimeSpan.FromSeconds(30) };
     // HttpClient.Timeout also cancels content streaming, so large packages need their own client
     // with a generous limit; otherwise slow connections abort the download after 30 seconds.
-    private readonly HttpClient _downloadClient = new(new SocketsHttpHandler { UseProxy = false, ConnectCallback = ColituPinnedHosts.ConnectAsync }) { Timeout = TimeSpan.FromMinutes(30) };
+    private readonly HttpClient _downloadClient = new(ColituCertPins.Pin(new SocketsHttpHandler { UseProxy = false, ConnectCallback = ColituPinnedHosts.ConnectAsync })) { Timeout = TimeSpan.FromMinutes(30) };
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public event Action<ColituUpdateInfo>? UpdateAvailable;
@@ -67,6 +68,11 @@ public sealed class ColituUpdateService
             if (!ColituUpdateSignature.Verify(payload))
             {
                 Logging.SaveLog("ColituUpdateService: release manifest signature is missing or invalid; update ignored");
+                return null;
+            }
+            if (!ColituUpdateSignature.IsFresh(payload, DateTimeOffset.UtcNow, out var staleReason))
+            {
+                Logging.SaveLog($"ColituUpdateService: release manifest rejected ({staleReason}); no update offered");
                 return null;
             }
             LastCheckFailed = false;
@@ -624,8 +630,20 @@ internal sealed class ColituVersionPayload
     public string? Sha256 { get; set; }
     public bool ForceUpdate { get; set; }
     public string? ReleaseNotes { get; set; }
-    /// <summary>Base64 ECDSA P-256 signature over <see cref="ColituUpdateSignature.Message"/>.</summary>
+    /// <summary>ISO-8601 UTC time the manifest was signed (part of the signed text).</summary>
+    [JsonPropertyName("issued_at")]
+    public string? IssuedAt { get; set; }
+    /// <summary>ISO-8601 UTC time after which the manifest is void (part of the signed text).</summary>
+    [JsonPropertyName("expires_at")]
+    public string? ExpiresAt { get; set; }
+    /// <summary>
+    /// Base64 ECDSA P-256 signature over <see cref="ColituUpdateSignature.Message"/> (the 2.8.4 and
+    /// older format, no dates). Kept so those clients still verify the manifest; this code ignores it.
+    /// </summary>
     public string? Signature { get; set; }
+    /// <summary>Base64 ECDSA P-256 signature over <see cref="ColituUpdateSignature.MessageV2"/> (legacy text + issued_at + expires_at).</summary>
+    [JsonPropertyName("signature_v2")]
+    public string? SignatureV2 { get; set; }
 }
 
 /// <summary>
@@ -652,9 +670,52 @@ internal static class ColituUpdateSignature
         (payload.Sha256 ?? "").Trim().ToLowerInvariant(),
         payload.ForceUpdate ? "true" : "false");
 
+    /// <summary>The text <c>signature_v2</c> covers: the legacy text, then issued_at and expires_at (one per line).</summary>
+    internal static string MessageV2(ColituVersionPayload payload) => string.Join("\n",
+        Message(payload),
+        payload.IssuedAt ?? "",
+        payload.ExpiresAt ?? "");
+
+    /// <summary>A manifest older than this is not offered, so a replayed old one can't hold back a newer release.</summary>
+    internal static readonly TimeSpan MaxManifestAge = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Freshness of an already verified manifest: it must carry issued_at and expires_at, must not
+    /// be issued more than <see cref="MaxManifestAge"/> ago and must not be expired.
+    /// </summary>
+    internal static bool IsFresh(ColituVersionPayload payload, DateTimeOffset now, out string reason)
+    {
+        if (!TryParseUtc(payload.IssuedAt, out var issuedAt) || !TryParseUtc(payload.ExpiresAt, out var expiresAt))
+        {
+            reason = "issued_at/expires_at missing or invalid";
+            return false;
+        }
+        if (now - issuedAt > MaxManifestAge)
+        {
+            reason = "issued_at is more than 30 days old";
+            return false;
+        }
+        if (now >= expiresAt)
+        {
+            reason = "expires_at has passed";
+            return false;
+        }
+        reason = "";
+        return true;
+    }
+
+    private static bool TryParseUtc(string? value, out DateTimeOffset result)
+    {
+        result = default;
+        return !string.IsNullOrWhiteSpace(value)
+            && DateTimeOffset.TryParse(value.Trim(), CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out result);
+    }
+
     internal static bool Verify(ColituVersionPayload payload, string publicKeyPem = PublicKeyPem)
     {
-        if (string.IsNullOrWhiteSpace(payload.Signature)
+        // Only signature_v2 counts: the legacy signature has no dates, so an old manifest could be replayed.
+        if (string.IsNullOrWhiteSpace(payload.SignatureV2)
             || string.IsNullOrWhiteSpace(payload.Sha256)
             || string.IsNullOrWhiteSpace(payload.DownloadUrl))
         {
@@ -664,7 +725,7 @@ internal static class ColituUpdateSignature
         {
             using var key = ECDsa.Create();
             key.ImportFromPem(publicKeyPem);
-            return key.VerifyData(Encoding.UTF8.GetBytes(Message(payload)), Convert.FromBase64String(payload.Signature.Trim()), HashAlgorithmName.SHA256);
+            return key.VerifyData(Encoding.UTF8.GetBytes(MessageV2(payload)), Convert.FromBase64String(payload.SignatureV2.Trim()), HashAlgorithmName.SHA256);
         }
         catch
         {

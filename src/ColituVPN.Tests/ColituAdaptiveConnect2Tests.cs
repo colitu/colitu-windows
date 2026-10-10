@@ -85,6 +85,95 @@ public class ColituAdaptiveConnect2Tests
         memory.IsStalled(Net, "a", "hysteria2", Now.AddHours(7)).Should().BeFalse();
     }
 
+    [Fact]
+    public void MidSessionPenalty_ProvenGetsAtMost90Seconds_OthersTheFullPenalty()
+    {
+        ColituAdaptiveMemory.MidSessionPenalty(true, TimeSpan.FromMinutes(10)).Should().Be(TimeSpan.FromSeconds(90));
+        ColituAdaptiveMemory.MidSessionPenalty(true, TimeSpan.FromHours(6)).Should().Be(TimeSpan.FromSeconds(90));
+        ColituAdaptiveMemory.MidSessionPenalty(false, TimeSpan.FromMinutes(10)).Should().Be(TimeSpan.FromMinutes(10));
+        ColituAdaptiveMemory.MidSessionPenalty(true, TimeSpan.FromSeconds(30)).Should().Be(TimeSpan.FromSeconds(30));
+        ColituAdaptiveMemory.MidSessionPenalty(false, TimeSpan.FromSeconds(30)).Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public void MarkMidSessionStall_ProvenTransport_ShortMark_UnprovenKeepsTheFullOne()
+    {
+        var memory = new ColituAdaptiveMemory();
+        memory.RememberGoodTransport(Net, "a", "hysteria2", Now);
+        memory.MarkMidSessionStall(Net, "a", "hysteria2", Now.AddMinutes(1), provisional: true).Should().BeTrue();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(1).AddSeconds(60)).Should().BeTrue();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(1).AddSeconds(100)).Should().BeFalse();
+        // Another transport carrying traffic does not turn the short mark into 6 h.
+        memory.RememberGoodTransport(Net, "a", "vless-reality", Now.AddMinutes(2));
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(5)).Should().BeFalse();
+        // The proof was removed by the first mark on server a: unproven now, the full 10 minutes.
+        memory.MarkMidSessionStall(Net, "a", "hysteria2", Now.AddMinutes(3), provisional: true).Should().BeFalse();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(8)).Should().BeTrue();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(14)).Should().BeFalse();
+
+        var other = new ColituAdaptiveMemory();
+        other.MarkMidSessionStall(Net, "a", "trojan", Now, provisional: false).Should().BeFalse();
+        other.IsStalled(Net, "a", "trojan", Now.AddHours(5)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Watch_DeferredVerdict_ComesBackOnTheNextMiss_NotThreeMissesLater()
+    {
+        var watch = new ColituTunnelWatch();
+        var last = ColituWatchAction.None;
+        for (var i = 0; i < ColituTunnelWatch.MissesForDead; i++)
+        {
+            last = watch.Round(null, false, true);
+        }
+        last.Should().Be(ColituWatchAction.PrimaryDead);
+        watch.Defer(last);
+        watch.Round(null, false, true).Should().Be(ColituWatchAction.PrimaryDead);
+
+        // A healthy round after a deferred verdict starts counting again.
+        watch.Defer(ColituWatchAction.PrimaryDead);
+        watch.Round(null, true, true).Should().Be(ColituWatchAction.None);
+        watch.Round(null, false, true).Should().Be(ColituWatchAction.None);
+        watch.NormalMisses.Should().Be(1);
+    }
+
+    [Fact]
+    public void SwapDeferral_UnknownIdleLightAfterMaxDeferBusyOtherwise()
+    {
+        var none = TimeSpan.Zero;
+        var longEnough = ColituSpareHealth.SwapMaxDefer;
+        ColituSpareHealth.SwapDeferral(null, none).Should().Be(new SwapDecision(true, "traffic unknown", "unknown"));
+        ColituSpareHealth.SwapDeferral(ColituSpareHealth.SwapIdleBytes - 1, none).Now.Should().BeTrue();
+        // 20 KB: busy at first, light (and fine to swap) after 2 minutes of deferral.
+        ColituSpareHealth.SwapDeferral(20 * 1024, none).Now.Should().BeFalse();
+        ColituSpareHealth.SwapDeferral(20 * 1024, longEnough - TimeSpan.FromSeconds(1)).Now.Should().BeFalse();
+        ColituSpareHealth.SwapDeferral(20 * 1024, longEnough).Now.Should().BeTrue();
+        // 100 KB: never light, however long it has been held back.
+        var busy = ColituSpareHealth.SwapDeferral(100 * 1024, TimeSpan.FromMinutes(30));
+        busy.Now.Should().BeFalse();
+        busy.Reason.Should().Be("busy (100 KB in the last 10 s)");
+        busy.Key.Should().Be("busy");
+        ColituSpareHealth.SwapDeferral(ColituSpareHealth.SwapLightBytes, longEnough).Now.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ClientNetwork_ServerListFillsIt_EmptyListKeepsIt_UnknownNetworkIsAnotherKey()
+    {
+        ColituAdaptiveConnect.ResolveClientNetwork("RU-AS0002", null).Should().Be("RU-AS0002");
+        ColituAdaptiveConnect.ResolveClientNetwork("", "RU-AS0001").Should().Be("RU-AS0001");
+        ColituAdaptiveConnect.ResolveClientNetwork(null, null).Should().BeNull();
+
+        // After an access-network change the client network is unknown: the old network's marks do not apply.
+        var memory = new ColituAdaptiveMemory();
+        var oldKey = ColituAdaptiveConnect.NetworkKey("wifi", "RU-AS0001");
+        var unknownKey = ColituAdaptiveConnect.NetworkKey("wifi", null);
+        unknownKey.Should().NotBe(oldKey);
+        memory.MarkStalled(oldKey, "a", "vless-reality", Now);
+        memory.RememberGoodTransport(oldKey, "a", "hysteria2", Now);
+        memory.IsStalled(oldKey, "a", "vless-reality", Now).Should().BeTrue();
+        memory.IsStalled(unknownKey, "a", "vless-reality", Now).Should().BeFalse();
+        memory.LastGoodTransport(unknownKey, "a", Now).Should().BeNull();
+    }
+
     // ── 5: spare choice ──────────────────────────────────────────────────────
     private static readonly string[] All = ["hysteria2", "vless-reality", "vless-xhttp", "trojan", "shadowsocks"];
 

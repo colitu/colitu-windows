@@ -1114,6 +1114,7 @@
                                         <StackPanel x:Name="SplitLists">
                                             <TextBlock Margin="2,18,0,8" Style="{StaticResource FieldLabel}" Text="{s:T split.apps}" />
                                             <TextBlock x:Name="SplitProxyNote" Margin="2,0,0,8" FontSize="12.5" Foreground="#F5C36B" Text="{s:T split.proxyNote}" TextWrapping="Wrap" Visibility="Collapsed" />
+                                            <TextBlock Margin="2,0,0,8" Style="{StaticResource Small}" Text="{s:T split.appsNote}" TextWrapping="Wrap" />
                                             <ItemsControl x:Name="SplitAppsList" />
                                             <Button Margin="0,6,0,0" HorizontalAlignment="Left" Click="SplitAddApp_Click" Content="{s:T split.addApp}" Style="{StaticResource LinkButton}" />
 

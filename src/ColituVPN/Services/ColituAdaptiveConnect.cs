@@ -27,6 +27,13 @@ public static class ColituAdaptiveConnect
         && !memory.WorkedOnNetwork(networkKey, protocol, now);
 
     /// <summary>
+    /// The client network after a server list: the panel's value when it sent one (a list fetched
+    /// through the VPN comes back empty and never overwrites), otherwise what was known.
+    /// </summary>
+    public static string? ResolveClientNetwork(string? fromServerList, string? known) =>
+        string.IsNullOrWhiteSpace(fromServerList) ? known : fromServerList;
+
+    /// <summary>
     /// "&lt;link&gt;|&lt;client_network&gt;", e.g. "wifi|TR-AS9121". Memory from another key is not
     /// applied (it stays stored under its own key until it expires).
     /// </summary>
@@ -121,6 +128,8 @@ public sealed class ColituAdaptiveMemory
     public const string Stalled = "stalled";
     /// <summary>A stall found during a failing round or mid-session on TCP: 10 minutes, 6 h once another transport carries traffic here.</summary>
     public const string StalledProvisional = "stalled-provisional";
+    /// <summary>A mid-session stall of a transport that already worked on this network: only 90 s (the network blocked it for a while, it is not broken).</summary>
+    public const string StalledShort = "stalled-short";
     public const string Penalized = "penalized";
 
     public static readonly TimeSpan GoodServerFor = TimeSpan.FromHours(24);
@@ -128,6 +137,8 @@ public sealed class ColituAdaptiveMemory
     public static readonly TimeSpan StalledFor = TimeSpan.FromHours(6);
     public static readonly TimeSpan StalledProvisionalFor = TimeSpan.FromMinutes(10);
     public static readonly TimeSpan PenalizedFor = TimeSpan.FromMinutes(30);
+    /// <summary>Penalty of a mid-session stall for a transport that is proven on this network (Android PROVEN_STALL_PENALTY).</summary>
+    public static readonly TimeSpan ProvenStallPenalty = TimeSpan.FromSeconds(90);
     public const int MaxEntries = 200;
 
     private readonly object _gate = new();
@@ -139,9 +150,20 @@ public sealed class ColituAdaptiveMemory
         GoodTransport => GoodTransportFor,
         Stalled => StalledFor,
         StalledProvisional => StalledProvisionalFor,
+        StalledShort => ProvenStallPenalty,
         Penalized => PenalizedFor,
         _ => TimeSpan.Zero
     };
+
+    /// <summary>
+    /// How long a MID-SESSION stall puts a transport last: a transport that already worked on this
+    /// network (<paramref name="proven"/>) only for <see cref="ProvenStallPenalty"/> (or less, when
+    /// <paramref name="full"/> is shorter), otherwise <paramref name="full"/>. Connect-time marks don't use it.
+    /// </summary>
+    public static TimeSpan MidSessionPenalty(bool proven, TimeSpan full) =>
+        proven && ProvenStallPenalty < full ? ProvenStallPenalty : full;
+
+    private static bool IsStallKind(string kind) => kind is Stalled or StalledProvisional or StalledShort;
 
     /// <summary>Replaces the memory with saved entries, dropping expired and unknown ones.</summary>
     public void Load(IEnumerable<ColituAdaptiveEntry>? entries, DateTimeOffset now)
@@ -236,7 +258,7 @@ public sealed class ColituAdaptiveMemory
         lock (_gate)
         {
             _entries.RemoveAll(entry => entry.Kind == GoodTransport && Same(entry.Network, network) && Same(entry.Server, server));
-            _entries.RemoveAll(entry => entry.Kind is Stalled or StalledProvisional && Same(entry.Network, network) && Same(entry.Transport, transport)
+            _entries.RemoveAll(entry => IsStallKind(entry.Kind) && Same(entry.Network, network) && Same(entry.Transport, transport)
                 && (Same(entry.Server, server) || entry.Server.Length == 0));
             // Another transport carries traffic here: the provisional marks of this network were real (6 h).
             for (var i = 0; i < _entries.Count; i++)
@@ -321,13 +343,42 @@ public sealed class ColituAdaptiveMemory
         }
     }
 
+    /// <summary>
+    /// A stall found MID-SESSION (the tunnel carried nothing). A transport that already worked on this
+    /// network gets the short <see cref="ProvenStallPenalty"/> mark (<see cref="MidSessionPenalty"/>),
+    /// otherwise the usual mark: 10 minutes (<paramref name="provisional"/>) or 6 h. Returns true when the
+    /// short mark was written (log "proven here: short penalty"). A live 6 h mark is never shortened.
+    /// </summary>
+    public bool MarkMidSessionStall(string network, string? server, string? transport, DateTimeOffset now, bool provisional)
+    {
+        if (string.IsNullOrWhiteSpace(transport)) return false;
+        var full = provisional ? StalledProvisionalFor : StalledFor;
+        var proven = WorkedOnNetwork(network, transport, now);
+        if (MidSessionPenalty(proven, full) != ProvenStallPenalty)
+        {
+            MarkStalled(network, server, transport, now, provisional);
+            return false;
+        }
+        var serverKey = server?.Trim() ?? "";
+        lock (_gate)
+        {
+            if (!_entries.Any(entry => entry.Kind == Stalled && Same(entry.Network, network) && Same(entry.Transport, transport) && Same(entry.Server, serverKey) && Alive(entry, now)))
+            {
+                _entries.RemoveAll(entry => (entry.Kind == StalledProvisional || entry.Kind == StalledShort) && Same(entry.Network, network) && Same(entry.Transport, transport) && Same(entry.Server, serverKey));
+                _entries.RemoveAll(entry => entry.Kind == GoodTransport && Same(entry.Network, network) && Same(entry.Transport, transport) && Same(entry.Server, serverKey));
+                AddLocked(new() { Kind = StalledShort, Network = network, Server = serverKey, Transport = transport, At = now }, now);
+            }
+        }
+        return true;
+    }
+
     /// <summary>Stalled on this server, or on this network as a whole.</summary>
     public bool IsStalled(string network, string? server, string? transport, DateTimeOffset now)
     {
         if (string.IsNullOrWhiteSpace(transport)) return false;
         lock (_gate)
         {
-            return _entries.Any(entry => entry.Kind is Stalled or StalledProvisional && Same(entry.Network, network) && Same(entry.Transport, transport)
+            return _entries.Any(entry => IsStallKind(entry.Kind) && Same(entry.Network, network) && Same(entry.Transport, transport)
                 && (entry.Server.Length == 0 || (!string.IsNullOrWhiteSpace(server) && Same(entry.Server, server))) && Alive(entry, now));
         }
     }
