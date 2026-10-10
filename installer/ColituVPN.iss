@@ -144,14 +144,26 @@ end;
 // Users: Modify", and a standard user may have created it beforehand and still own it (WRITE_DAC).
 // So the folder is locked down before any file is copied into it, its owner and every child's
 // ACL included, and the install stops if that fails.
+// True when Dir is where an earlier Colitu VPN was installed, as the machine-wide uninstall entry
+// says (only administrators can write it). A ColituVPN.exe in the folder proves nothing: anyone
+// who created the folder could have put one there next to planted DLLs.
+function IsPreviousInstallDir(const Dir: String): Boolean;
+var
+  Location: String;
+begin
+  Result := RegQueryStringValue(HKLM, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{B7B06C4E-1D5A-482F-A781-0F6C6C8A2B67}_is1', 'InstallLocation', Location)
+    and (CompareText(RemoveBackslashUnlessRoot(Location), RemoveBackslashUnlessRoot(Dir)) = 0);
+end;
+
 function LockDownAppDir(): String;
 var
   Dir: String;
 begin
   Result := '';
   Dir := ExpandConstant('{app}');
-  // Never take over a folder holding someone else's files (a drive root, a profile folder).
-  if DirExists(Dir) and not FileExists(AddBackslash(Dir) + '{#MyAppExeName}') and not IsDirEmpty(Dir) then
+  // Never take over a folder holding someone else's files (a drive root, a profile folder, or one
+  // a standard user prepared).
+  if DirExists(Dir) and not IsPreviousInstallDir(Dir) and not IsDirEmpty(Dir) then
   begin
     Result := 'The folder "' + Dir + '" already contains other files. Choose an empty folder for {#MyAppName}.';
     Exit;
