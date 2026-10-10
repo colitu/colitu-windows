@@ -32,7 +32,9 @@ public static class ColituShell
             Logging.SaveLog($"ColituShell.OpenUrl: refused link with an unsupported scheme or form ({Truncate(url)})");
             return false;
         }
-        return StartViaExplorer(new Uri(url!.Trim()).AbsoluteUri);
+        // Explorer reads commas in its command line as switch separators (/root,<program>), so
+        // a link from server-sent text must not carry one; %2C means the same to a web server.
+        return StartViaExplorer(new Uri(url!.Trim()).AbsoluteUri.Replace(",", "%2C", StringComparison.Ordinal));
     }
 
     /// <summary>Shows one of the app's own folders (logs) in Explorer.</summary>
