@@ -84,6 +84,22 @@ public class ColituAdaptiveConnectTests
     }
 
     [Fact]
+    public void Rank_NeverPicksRussianServers_WhereverTheUserIs()
+    {
+        var servers = new[] { Server("ru1", "RU"), Server("de1", "DE"), Server("ru2", " ru "), Server("nl1", "NL") };
+        var pings = Pings(("ru1", 3), ("de1", 80), ("nl1", 60));
+        var memory = new ColituAdaptiveMemory();
+        memory.RememberGoodServer(Wifi, "ru1", Now.AddMinutes(-5));
+
+        foreach (var country in new[] { "RU", "TR", null })
+        {
+            Rank(servers, pings, memory, country).Should().Equal("nl1", "de1");
+        }
+        Rank(new[] { Server("ru1", "RU") }).Should().BeEmpty();
+        ColituAdaptiveConnect.AutoExcluded(Server("x", "ru")).Should().BeTrue();
+    }
+
+    [Fact]
     public void Rank_LastGoodServerOnThisNetwork_GoesFirst()
     {
         var servers = new[] { Server("a"), Server("b"), Server("c") };

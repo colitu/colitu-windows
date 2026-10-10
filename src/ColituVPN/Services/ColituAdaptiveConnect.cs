@@ -41,8 +41,18 @@ public static class ColituAdaptiveConnect
         $"{(string.IsNullOrWhiteSpace(link) ? "other" : link.Trim().ToLowerInvariant())}|{clientNetwork?.Trim() ?? ""}";
 
     /// <summary>
+    /// Server countries automatic mode never picks: a Russian exit carries the same blocks the
+    /// user wants to get away from, wherever the user is. A manual choice still connects there.
+    /// </summary>
+    public static readonly IReadOnlySet<string> AutoExcludedCountries =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "RU" };
+
+    public static bool AutoExcluded(ColituVpnServer server) =>
+        AutoExcludedCountries.Contains(server.CountryCode?.Trim() ?? "");
+
+    /// <summary>
     /// Servers of the list in the order automatic mode tries them (multihop routes, unavailable
-    /// and locked servers left out). The "best server" entry shows rank[0], and connect uses it:
+    /// and locked servers and those in <see cref="AutoExcludedCountries"/> left out). The "best server" entry shows rank[0], and connect uses it:
     /// <list type="number">
     /// <item>penalized on this network: last (the oldest penalty first, so retries rotate);</item>
     /// <item>a fresh ping that failed: after all others except the penalized ones;</item>
@@ -63,7 +73,7 @@ public static class ColituAdaptiveConnect
         var country = clientCountry?.Trim();
         var lastGood = memory.LastGoodServer(networkKey, now);
         return servers
-            .Where(server => !string.IsNullOrWhiteSpace(server.Id) && !server.IsMultihop && server.Available && !server.Locked)
+            .Where(server => !string.IsNullOrWhiteSpace(server.Id) && !server.IsMultihop && server.Available && !server.Locked && !AutoExcluded(server))
             .GroupBy(server => server.Id!, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .Select((server, index) =>
