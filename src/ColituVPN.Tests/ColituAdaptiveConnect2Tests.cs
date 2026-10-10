@@ -85,6 +85,57 @@ public class ColituAdaptiveConnect2Tests
         memory.IsStalled(Net, "a", "hysteria2", Now.AddHours(7)).Should().BeFalse();
     }
 
+    [Fact]
+    public void MidSessionPenalty_ProvenGetsAtMost90Seconds_OthersTheFullPenalty()
+    {
+        ColituAdaptiveMemory.MidSessionPenalty(true, TimeSpan.FromMinutes(10)).Should().Be(TimeSpan.FromSeconds(90));
+        ColituAdaptiveMemory.MidSessionPenalty(true, TimeSpan.FromHours(6)).Should().Be(TimeSpan.FromSeconds(90));
+        ColituAdaptiveMemory.MidSessionPenalty(false, TimeSpan.FromMinutes(10)).Should().Be(TimeSpan.FromMinutes(10));
+        ColituAdaptiveMemory.MidSessionPenalty(true, TimeSpan.FromSeconds(30)).Should().Be(TimeSpan.FromSeconds(30));
+        ColituAdaptiveMemory.MidSessionPenalty(false, TimeSpan.FromSeconds(30)).Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public void MarkMidSessionStall_ProvenTransport_ShortMark_UnprovenKeepsTheFullOne()
+    {
+        var memory = new ColituAdaptiveMemory();
+        memory.RememberGoodTransport(Net, "a", "hysteria2", Now);
+        memory.MarkMidSessionStall(Net, "a", "hysteria2", Now.AddMinutes(1), provisional: true).Should().BeTrue();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(1).AddSeconds(60)).Should().BeTrue();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(1).AddSeconds(100)).Should().BeFalse();
+        // Another transport carrying traffic does not turn the short mark into 6 h.
+        memory.RememberGoodTransport(Net, "a", "vless-reality", Now.AddMinutes(2));
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(5)).Should().BeFalse();
+        // The proof was removed by the first mark on server a: unproven now, the full 10 minutes.
+        memory.MarkMidSessionStall(Net, "a", "hysteria2", Now.AddMinutes(3), provisional: true).Should().BeFalse();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(8)).Should().BeTrue();
+        memory.IsStalled(Net, "a", "hysteria2", Now.AddMinutes(14)).Should().BeFalse();
+
+        var other = new ColituAdaptiveMemory();
+        other.MarkMidSessionStall(Net, "a", "trojan", Now, provisional: false).Should().BeFalse();
+        other.IsStalled(Net, "a", "trojan", Now.AddHours(5)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Watch_DeferredVerdict_ComesBackOnTheNextMiss_NotThreeMissesLater()
+    {
+        var watch = new ColituTunnelWatch();
+        var last = ColituWatchAction.None;
+        for (var i = 0; i < ColituTunnelWatch.MissesForDead; i++)
+        {
+            last = watch.Round(null, false, true);
+        }
+        last.Should().Be(ColituWatchAction.PrimaryDead);
+        watch.Defer(last);
+        watch.Round(null, false, true).Should().Be(ColituWatchAction.PrimaryDead);
+
+        // A healthy round after a deferred verdict starts counting again.
+        watch.Defer(ColituWatchAction.PrimaryDead);
+        watch.Round(null, true, true).Should().Be(ColituWatchAction.None);
+        watch.Round(null, false, true).Should().Be(ColituWatchAction.None);
+        watch.NormalMisses.Should().Be(1);
+    }
+
     // ── 5: spare choice ──────────────────────────────────────────────────────
     private static readonly string[] All = ["hysteria2", "vless-reality", "vless-xhttp", "trojan", "shadowsocks"];
 

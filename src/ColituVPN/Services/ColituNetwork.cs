@@ -162,6 +162,31 @@ public static class ColituNetwork
     /// </summary>
     public static string? PhysicalInterfaceName() => PhysicalInterface()?.Name;
 
+    /// <summary>
+    /// The network the physical adapter is on: its name, IPv4 addresses and IPv4 gateways. A new
+    /// Wi-Fi network (a phone hotspot) on the same adapter changes it; the adapter name does not.
+    /// </summary>
+    public static string? PhysicalNetworkFingerprint()
+    {
+        try
+        {
+            if (PhysicalInterface() is not { } adapter)
+            {
+                return null;
+            }
+            var properties = adapter.GetIPProperties();
+            var addresses = properties.UnicastAddresses.Where(item => item.Address.AddressFamily == AddressFamily.InterNetwork)
+                .Select(item => item.Address.ToString()).Order(StringComparer.Ordinal);
+            var gateways = properties.GatewayAddresses.Where(item => item.Address.AddressFamily == AddressFamily.InterNetwork && !item.Address.Equals(IPAddress.Any))
+                .Select(item => item.Address.ToString()).Order(StringComparer.Ordinal);
+            return $"{adapter.Name}|{string.Join(",", addresses)}|{string.Join(",", gateways)}";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>IPv4 interface index of <see cref="PhysicalInterfaceName"/>, for IP_UNICAST_IF.</summary>
     public static int? PhysicalInterfaceIndex()
     {

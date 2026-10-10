@@ -507,22 +507,51 @@ public sealed class ColituEndpointList
         CancellationToken token)
     {
         Exception? last = null;
-        for (var i = 0; i < bases.Count; i++)
+        for (var round = 0; round < 2; round++)
         {
-            token.ThrowIfCancellationRequested();
-            try
+            var namesFailed = true;
+            for (var i = 0; i < bases.Count; i++)
             {
-                var response = await send(bases[i]);
-                onWorked?.Invoke(bases[i]);
-                return response;
+                token.ThrowIfCancellationRequested();
+                try
+                {
+                    var response = await send(bases[i]);
+                    onWorked?.Invoke(bases[i]);
+                    return response;
+                }
+                catch (Exception ex) when (!token.IsCancellationRequested && shouldFailover(ex))
+                {
+                    last = ex;
+                    namesFailed &= IsNameResolutionFailure(ex);
+                    Log($"API base {HostOf(bases[i])} failed ({ex.GetType().Name}); trying the next one");
+                }
             }
-            catch (Exception ex) when (!token.IsCancellationRequested && shouldFailover(ex))
+            // Windows could not resolve any of them (just after a kill switch was released, or a
+            // broken resolver): look the names up over DoH from this app, pin them, try once more.
+            if (round > 0 || bases.Count == 0 || !namesFailed)
             {
-                last = ex;
-                Log($"API base {HostOf(bases[i])} failed ({ex.GetType().Name}); trying the next one");
+                break;
             }
+            Log("No API name resolved; resolving them over DoH and trying again");
+            await ColituPinnedHosts.RefreshAsync(bases.Select(HostOf), token);
         }
         throw last ?? new HttpRequestException("No API base configured");
+    }
+
+    private static bool IsNameResolutionFailure(Exception ex)
+    {
+        if (ex is HttpRequestException { HttpRequestError: HttpRequestError.NameResolutionError })
+        {
+            return true;
+        }
+        for (var inner = ex.InnerException ?? (ex as SocketException as Exception); inner != null; inner = inner.InnerException)
+        {
+            if (inner is SocketException { SocketErrorCode: SocketError.HostNotFound or SocketError.TryAgain or SocketError.NoData })
+            {
+                return true;
+            }
+        }
+        return ex is SocketException { SocketErrorCode: SocketError.HostNotFound or SocketError.TryAgain or SocketError.NoData };
     }
 
     /// <summary>Replaces the known API base at the start of <paramref name="uri"/> with <paramref name="target"/>; other URLs stay.</summary>

@@ -215,7 +215,8 @@ public class ColituEndpointListTests
             baseUrl =>
             {
                 tried.Add(baseUrl);
-                return Task.FromException<HttpResponseMessage>(new HttpRequestException(HttpRequestError.NameResolutionError, baseUrl));
+                // A connect failure: name failures get one more round after a DoH lookup (below).
+                return Task.FromException<HttpResponseMessage>(new HttpRequestException(HttpRequestError.ConnectionError, baseUrl));
             },
             ex => ColituEndpointList.ShouldFailover(ex, isGet: true),
             null,
@@ -253,5 +254,31 @@ public class ColituEndpointListTests
         var hosts = NewList().PinnedUrls().Select(url => new Uri(url).Host).ToHashSet();
 
         hosts.Should().Contain(["api.colitu.com", "mirror.example.test", "colitu.com"]);
+    }
+
+    /// <summary>
+    /// Every API name failing to resolve (Windows' resolver right after a kill switch was released)
+    /// gets one more round after the names were looked up over DoH and pinned. 2.8.3 gave up and
+    /// the account stayed unloaded until the next connect.
+    /// </summary>
+    [Fact]
+    public async Task NoNameResolved_TriesEveryBaseOnceMore()
+    {
+        var tried = new List<string>();
+        using var response = await ColituEndpointList.SendWithFailoverAsync(
+            ["https://127.0.0.1", "https://127.0.0.2"],
+            baseUrl =>
+            {
+                tried.Add(baseUrl);
+                return tried.Count <= 2
+                    ? throw new HttpRequestException(HttpRequestError.NameResolutionError, "no such host")
+                    : Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            },
+            ex => ColituEndpointList.ShouldFailover(ex, isGet: true),
+            null,
+            CancellationToken.None);
+
+        tried.Should().Equal("https://127.0.0.1", "https://127.0.0.2", "https://127.0.0.1");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 }

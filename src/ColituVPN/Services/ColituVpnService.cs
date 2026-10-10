@@ -94,6 +94,8 @@ public sealed class ColituVpnService
     /// <summary>The tunnel's resolver answered once this session, so a silence means it hangs (not that the check can't work).</summary>
     private bool _dnsCheckWorks;
     private Timer? _networkChangeDebounce;
+    /// <summary><see cref="ColituNetwork.PhysicalNetworkFingerprint"/> when the tunnel was last verified.</summary>
+    private volatile string? _verifiedNetwork;
     /// <summary>"No internet" was shown for the current outage; not repeated every check.</summary>
     private bool _offlineNoticeShown;
     /// <summary>Path checks in a row that found no internet at all.</summary>
@@ -1259,11 +1261,12 @@ public sealed class ColituVpnService
         try
         {
             await RecoverKillSwitchAsync();
-            if (KillSwitchEngaged)
+            if (KillSwitchEngaged || _previousRunStatus is ColituVpnStatus.Connected or ColituVpnStatus.Connecting or ColituVpnStatus.Reconnecting)
             {
-                // Held from the last run: the system resolver is blocked, so the first panel call
-                // at start-up failed ("no such host") and the app said the server was unreachable
-                // until the connect pinned the addresses. Pin them now (DoH from this app is allowed).
+                // Held from the last run (or just released after it): the system resolver is
+                // blocked or not back yet, so the first panel call at start-up failed ("no such
+                // host") and the account and plan stayed unloaded until the next connect pinned the
+                // addresses. Pin them now (DoH from this app is allowed).
                 using var budget = new CancellationTokenSource(TimeSpan.FromSeconds(4));
                 await ColituPinnedHosts.RefreshAsync(PinnedAppHosts(), budget.Token);
             }
@@ -1977,7 +1980,11 @@ public sealed class ColituVpnService
     /// adapter that carries the internet now, a fresh DNS client. True when traffic flows again
     /// (or when a connect, switch or disconnect took over meanwhile).
     /// </summary>
-    private async Task<bool> TryRestartCoreAsync(string reason)
+    /// <param name="quick">
+    /// One short check round: after a network change the transport may simply not work on the new
+    /// network (a mobile operator blocking it), and the connect that follows a failure picks another.
+    /// </param>
+    private async Task<bool> TryRestartCoreAsync(string reason, bool quick = false)
     {
         if (!await _connectionLock.WaitAsync(0))
         {
@@ -1999,7 +2006,9 @@ public sealed class ColituVpnService
             await StopCoreAsync();
             ResetDirectConnections();
             await ReloadCoreAsync(token);
-            var probe = await VerifyConnectionActiveAsync(ConnectedServer, 2, token);
+            var probe = quick
+                ? await VerifyConnectionActiveAsync(ConnectedServer, 1, token, TimeSpan.FromSeconds(5))
+                : await VerifyConnectionActiveAsync(ConnectedServer, 2, token);
             if (token.IsCancellationRequested || _userDisconnected)
             {
                 // The user's action, waiting for the lock, takes it from here.
@@ -2132,15 +2141,23 @@ public sealed class ColituVpnService
         {
             var bound = _config.CoreBasicItem.BindInterface;
             var physical = ColituNetwork.PhysicalInterfaceName();
-            if (!CanHeal() || physical == null || bound.IsNullOrEmpty() || string.Equals(physical, bound, StringComparison.OrdinalIgnoreCase))
+            var network = ColituNetwork.PhysicalNetworkFingerprint();
+            var adapterChanged = bound.IsNotEmpty() && physical != null && !string.Equals(physical, bound, StringComparison.OrdinalIgnoreCase);
+            // The same adapter on another network (home Wi-Fi to a phone hotspot): the old
+            // connections, the tunnel's DNS connection among them, are dead, yet nothing failed
+            // yet. Until 2.8.3 the app kept saying "protected" for up to 90 s without names.
+            var networkChanged = network != null && _verifiedNetwork != null && !string.Equals(network, _verifiedNetwork, StringComparison.Ordinal);
+            if (!CanHeal() || physical == null || (!adapterChanged && !networkChanged))
             {
                 return;
             }
-            LogConnection($"Network changed ({bound} -> {physical}); moving the tunnel to the new adapter");
+            LogConnection(adapterChanged
+                ? $"Network changed ({bound} -> {physical}); moving the tunnel to the new adapter"
+                : $"Network changed on {physical} (new address or gateway); restarting the tunnel there");
             // Marks from now on belong to the new network (its ISP key is learnt at the next server list).
             _linkKind = null;
             _networkKey = CurrentNetworkKey();
-            if (!await TryRestartCoreAsync("network changed") && !_userDisconnected)
+            if (!await TryRestartCoreAsync("network changed", quick: true) && !_userDisconnected)
             {
                 await OnTunnelLostAsync();
             }
@@ -3924,6 +3941,10 @@ public sealed class ColituVpnService
             ResetDirectConnections();
         }
         Status = status;
+        if (status == ColituVpnStatus.Connected)
+        {
+            _verifiedNetwork = ColituNetwork.PhysicalNetworkFingerprint();
+        }
         _session = _session with { Status = status, ConnectedAt = ConnectedAt };
         SaveState();
         StatusChanged?.Invoke(status);
