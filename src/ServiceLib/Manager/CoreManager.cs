@@ -26,6 +26,9 @@ public class CoreManager
 
     public bool IsCoreRunning => _processService is { HasExited: false };
     public bool IsPreCoreRunning => _processPreService is { HasExited: false };
+
+    /// <summary>A pre-socks core (the TUN front in front of Xray) was started and has ended without <see cref="CoreStop"/>.</summary>
+    public bool HasPreCoreExited => _processPreService is { HasExited: true };
     public string? CoreProcessFileName => _processService?.FileName;
     public string? CoreProcessArguments => _processService?.Arguments;
 

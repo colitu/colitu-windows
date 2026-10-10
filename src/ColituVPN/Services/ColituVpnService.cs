@@ -1411,7 +1411,11 @@ public sealed class ColituVpnService
         {
             return;
         }
-        if (!CoreManager.Instance.IsCoreRunning)
+        // Both processes: with Xray behind a sing-box TUN front, the front can die while Xray
+        // (and every probe through its loopback inbound) keeps answering, and the TUN routes
+        // that kept traffic in the tunnel are gone. OnCoreExited may have skipped it while a
+        // check was running, so the tick looks for it too.
+        if (!CoreManager.Instance.IsCoreRunning || CoreManager.Instance.HasPreCoreExited)
         {
             await RecoverTunnelAsync("VPN core stopped unexpectedly", coreStopped: true);
             return;
@@ -2645,7 +2649,7 @@ public sealed class ColituVpnService
                 }
                 if (Interlocked.Exchange(ref _watchdogBusy, 1) == 1)
                 {
-                    // A check is running; the next tick sees the stopped core.
+                    // A check is running; the next tick sees the stopped core (main or pre-socks).
                     return;
                 }
                 try
@@ -2845,6 +2849,12 @@ public sealed class ColituVpnService
         // warnings and errors still show why the tunnel failed. No access log either.
         _config.CoreBasicItem.Loglevel = "warning";
         _config.CoreBasicItem.LogEnabled = false;
+        // The local proxy has no password: it stays on 127.0.0.1, whatever an old or edited
+        // settings file says (v2rayN's "allow LAN" would open it to everyone on the network).
+        foreach (var inbound in _config.Inbound ?? [])
+        {
+            inbound.AllowLANConn = false;
+        }
         // Hysteria2 is not an Xray protocol; it runs on the bundled sing-box core.
         _config.CoreTypeItem = CoreTypes(ColituSplitTunnel.NeedsSingBox(Preferences, EffectiveTunMode));
         // No declared bandwidth: Hysteria2 then uses BBR, as on Android. v2rayN's 100/100 Mbps
