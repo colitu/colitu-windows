@@ -22,6 +22,7 @@ public sealed class ColituKillSwitch
     private static readonly Guid ConditionRemoteAddress = new("b235ae9a-1d64-49b8-a44c-5ff3d9095045");
     private static readonly Guid ConditionLocalAddress = new("d9ee00de-c1ef-4617-bfe3-ffd8f5a08957");
     private static readonly Guid ConditionRemotePort = new("c35a604d-d22b-4e1a-91b4-68f674ee674b");
+    private static readonly Guid ConditionLocalPort = new("0c1ba1af-5765-453f-af22-a8f791ac775b");
     private static readonly Guid ConditionProtocol = new("3971ef2b-623e-4f9a-8cb1-6e79b806b9a7");
 
     private const uint RpcCAuthnWinNt = 10;
@@ -139,6 +140,7 @@ public sealed class ColituKillSwitch
 
                     AddFilter(engine, memory, layer, 11, ActionPermit, "Permit DHCP",
                         Condition(ConditionProtocol, MatchEqual, TypeUInt8, (IntPtr)17),
+                        Condition(ConditionLocalPort, MatchEqual, TypeUInt16, (IntPtr)(v6 ? 546 : 68)),
                         Condition(ConditionRemotePort, MatchEqual, TypeUInt16, (IntPtr)(v6 ? 547 : 67)));
 
                     AddFilter(engine, memory, layer, 0, ActionBlock, "Block everything else");
